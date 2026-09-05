@@ -1,6 +1,6 @@
 /**
- * HarmoniX Music Player - Unified Audio Engine (YouTube IFrame + HTML5 Audio)
- * Menjamin suara selalu keluar dengan kualitas terbaik dan bebas masalah CORS
+ * HarmoniX Music Player - Unified Audio Engine (YouTube IFrame + HTML5 Audio + Offline IndexedDB)
+ * Menjamin suara selalu keluar dengan kualitas terbaik, bebas CORS, dan mendukung mode offline tanpa internet
  */
 
 import { Storage } from './storage.js';
@@ -17,12 +17,13 @@ export const EQ_PRESETS = {
 
 class AudioEngine {
   constructor() {
-    // HTML5 Audio untuk file lokal & streaming radio
+    // HTML5 Audio untuk file lokal, streaming radio, dan lagu offline
     this.audio = new Audio();
     this.audio.preload = 'metadata';
 
     // State pemutar
     this.currentTrack = null;
+    this.currentBlobUrl = null;
     this.queue = [];
     this.queueIndex = -1;
     this.isPlaying = false;
@@ -30,6 +31,7 @@ class AudioEngine {
     this.volume = 0.8;
     this.shuffle = false;
     this.repeat = 'off'; // 'off' | 'all' | 'one'
+    this.autoPlayRecommendations = true; // Mode putar otomatis saat antrean habis
 
     // YouTube IFrame Player instance & status
     this.ytPlayer = null;
@@ -51,12 +53,15 @@ class AudioEngine {
       durationChange: [],
       queueChange: [],
       volumeChange: [],
-      error: []
+      error: [],
+      queueEnded: [],
+      networkChange: []
     };
 
     this.loadSavedState();
     this.initHtml5AudioEvents();
     this.initYouTubeAPI();
+    this.initNetworkListener();
     this.startTimeTracker();
   }
 
@@ -68,6 +73,15 @@ class AudioEngine {
       this.shuffle = !!saved.shuffle;
       this.repeat = saved.repeat || 'off';
     }
+  }
+
+  initNetworkListener() {
+    window.addEventListener('online', () => {
+      this.emit('networkChange', { isOnline: true });
+    });
+    window.addEventListener('offline', () => {
+      this.emit('networkChange', { isOnline: false });
+    });
   }
 
   // --- Inisialisasi YouTube IFrame API ---
@@ -152,7 +166,7 @@ class AudioEngine {
     this.audio.addEventListener('error', (e) => {
       if (!this.isCurrentTrackYouTube()) {
         console.warn('Audio playback error:', e);
-        this.emit('error', 'Gagal memutar audio lokal.');
+        this.emit('error', 'Gagal memutar audio.');
       }
     });
   }
@@ -180,6 +194,10 @@ class AudioEngine {
   }
 
   isCurrentTrackYouTube() {
+    // Lagu offline atau yang memiliki audioBlob selalu diputar via HTML5 Audio
+    if (this.currentTrack && (this.currentTrack.isOffline || this.currentTrack.audioBlob || this.currentTrack.source === 'offline')) {
+      return false;
+    }
     return this.currentTrack && (this.currentTrack.source === 'youtube' || !!this.currentTrack.videoId);
   }
 
@@ -209,9 +227,35 @@ class AudioEngine {
     Storage.addToHistory(track);
     this.emit('trackChange', track);
 
-    // 1. Jika lagu dari YouTube
-    if (this.isCurrentTrackYouTube()) {
-      // Hentikan audio HTML5 jika sedang berjalan
+    // 1. Jika lagu offline (disimpan di IndexedDB)
+    if (track.isOffline || track.audioBlob || track.source === 'offline') {
+      if (this.isYtReady && this.ytPlayer) {
+        try { this.ytPlayer.stopVideo(); } catch (e) {}
+      }
+
+      if (this.currentBlobUrl) {
+        URL.revokeObjectURL(this.currentBlobUrl);
+        this.currentBlobUrl = null;
+      }
+
+      try {
+        if (track.audioBlob) {
+          this.currentBlobUrl = URL.createObjectURL(track.audioBlob);
+          this.audio.src = this.currentBlobUrl;
+        } else if (track.streamUrl) {
+          this.audio.src = track.streamUrl;
+        }
+        this.audio.volume = this.volume;
+        this.audio.muted = this.isMuted;
+        await this.audio.play();
+        this.isPlaying = true;
+        this.emit('playState', true);
+      } catch (e) {
+        console.warn('Pemutaran offline gagal:', e);
+      }
+    }
+    // 2. Jika lagu online YouTube
+    else if (this.isCurrentTrackYouTube()) {
       this.audio.pause();
       this.audio.currentTime = 0;
 
@@ -232,13 +276,10 @@ class AudioEngine {
         this.pendingYtVideoId = videoId;
       }
     } 
-    // 2. Jika lagu lokal atau radio internet
+    // 3. Jika lagu lokal atau radio internet
     else {
-      // Hentikan YouTube player jika sedang berjalan
       if (this.isYtReady && this.ytPlayer) {
-        try {
-          this.ytPlayer.stopVideo();
-        } catch (e) {}
+        try { this.ytPlayer.stopVideo(); } catch (e) {}
       }
 
       try {
@@ -293,6 +334,8 @@ class AudioEngine {
     } else {
       this.isPlaying = false;
       this.emit('playState', false);
+      // Notifikasi antrean habis untuk autoplay rekomendasi
+      this.emit('queueEnded', { lastTrack: this.currentTrack, queue: this.queue });
     }
   }
 
@@ -311,6 +354,7 @@ class AudioEngine {
       } else if (this.repeat === 'all') {
         this.queueIndex = 0;
       } else {
+        this.emit('queueEnded', { lastTrack: this.currentTrack, queue: this.queue });
         return;
       }
     }
@@ -321,7 +365,6 @@ class AudioEngine {
   prev() {
     if (this.queue.length === 0) return;
 
-    // Jika lagu sudah jalan > 3 detik, ulang dari awal
     let currentSecs = 0;
     if (this.isCurrentTrackYouTube() && this.ytPlayer && this.isYtReady) {
       currentSecs = this.ytPlayer.getCurrentTime() || 0;
@@ -358,11 +401,9 @@ class AudioEngine {
     this.volume = val;
     this.isMuted = val === 0;
 
-    // Update HTML5 audio
     this.audio.volume = val;
     this.audio.muted = this.isMuted;
 
-    // Update YouTube audio
     if (this.ytPlayer && this.isYtReady) {
       this.ytPlayer.setVolume(val * 100);
       if (this.isMuted) this.ytPlayer.mute();
@@ -406,7 +447,6 @@ class AudioEngine {
     return this.repeat;
   }
 
-  // Equalizer presets (untuk local audio)
   setEqualizerGains(gains) {
     Storage.saveSettings({ eqGains: gains });
   }

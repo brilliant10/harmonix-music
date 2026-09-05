@@ -3,7 +3,7 @@
  * Mengaktifkan instalasi PWA dan offline caching untuk antarmuka aplikasi
  */
 
-const CACHE_NAME = 'harmonix-cache-v1';
+const CACHE_NAME = 'harmonix-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -13,6 +13,8 @@ const ASSETS_TO_CACHE = [
   './js/visualizer.js',
   './js/api.js',
   './js/storage.js',
+  './js/offline.js',
+  './js/recommendations.js',
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-192.png'

@@ -116,6 +116,12 @@
         <nav class="space-y-1 pt-3 border-t border-white/5">
           <div class="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Koleksi Saya</div>
 
+          <button data-nav="offline" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all group">
+            <i data-lucide="cloud-off" class="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform"></i>
+            <span class="flex-1 text-left">Lagu Offline</span>
+            <span id="offline-badge-count" class="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold hidden">0</span>
+          </button>
+
           <button data-nav="local" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
             <i data-lucide="folder-music" class="w-4 h-4 text-cyan-400"></i>
             <span>Musik Lokal</span>
@@ -206,6 +212,12 @@
 
         <!-- Action Tools -->
         <div class="flex items-center gap-2">
+          <!-- Network Status Indicator -->
+          <div id="network-status-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="network-status-text">Online</span>
+          </div>
+
           <!-- PWA Download Header Button -->
           <button id="btn-install-pwa" onclick="window.App.installPWA()" title="Download & Pasang HarmoniX Desktop" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg glow-primary transition-all">
             <i data-lucide="download" class="w-4 h-4"></i>
@@ -262,10 +274,14 @@
 
     <!-- Right Drawer: Up Next Queue & Lyrics -->
     <div id="queue-drawer" class="fixed inset-y-0 right-0 z-40 w-80 md:w-96 glass-modal border-l border-white/10 flex flex-col justify-between p-5 transform translate-x-full transition-transform duration-300 shadow-2xl">
-      <div class="flex items-center justify-between pb-4 border-b border-white/5">
-        <div class="flex items-center gap-2">
-          <i data-lucide="list-music" class="w-5 h-5 text-indigo-400"></i>
-          <h3 class="text-base font-bold text-white">Antrean Lagu (Up Next)</h3>
+      <div class="flex items-center justify-between pb-3 border-b border-white/5">
+        <div class="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-white/10 text-xs">
+          <button id="drawer-tab-queue" onclick="window.App.switchDrawerTab('queue')" class="px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all">
+            Antrean (<span id="drawer-queue-tab-count">0</span>)
+          </button>
+          <button id="drawer-tab-similar" onclick="window.App.switchDrawerTab('similar')" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i> Lagu Mirip
+          </button>
         </div>
         <button onclick="window.App.toggleQueueDrawer()" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
           <i data-lucide="x" class="w-5 h-5"></i>
@@ -273,12 +289,17 @@
       </div>
 
       <!-- Current Track Info in Drawer -->
-      <div id="drawer-current-track" class="py-4 border-b border-white/5">
+      <div id="drawer-current-track" class="py-3 border-b border-white/5">
         <!-- Injected via JS -->
       </div>
 
       <!-- Queue List -->
       <div class="flex-1 overflow-y-auto py-3 space-y-2" id="drawer-queue-list">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Similar / Recommended Tracks List in Drawer -->
+      <div class="flex-1 overflow-y-auto py-3 space-y-2 hidden" id="drawer-similar-list">
         <!-- Injected via JS -->
       </div>
 
@@ -310,6 +331,9 @@
       </div>
       <button id="player-like-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.toggleLike(window.Player.currentTrack, this)" class="p-1.5 text-slate-400 hover:text-rose-500 transition-colors flex-shrink-0">
         <i data-lucide="heart" class="w-5 h-5"></i>
+      </button>
+      <button id="player-download-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.openDownloadModal(window.Player.currentTrack)" title="Download / Simpan Offline" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors flex-shrink-0">
+        <i data-lucide="download" class="w-5 h-5"></i>
       </button>
     </div>
 
@@ -774,7 +798,77 @@
     </div>
   </div>
 
-  <!-- 8. Floating Context Menu -->
+  <!-- 8. Modal Download / Simpan Offline Lagu -->
+  <div id="track-download-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+            <i data-lucide="download" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-bold text-white">Download & Mode Offline</h3>
+        </div>
+        <button onclick="document.getElementById('track-download-modal').classList.add('hidden')" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Track Preview -->
+      <div class="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10">
+        <img id="dl-modal-art" src="icons/icon-192.png" alt="Art" class="w-14 h-14 rounded-xl object-cover" />
+        <div class="min-w-0 flex-1">
+          <h4 id="dl-modal-title" class="text-sm font-bold text-white truncate">Judul Lagu</h4>
+          <p id="dl-modal-artist" class="text-xs text-slate-400 truncate">Nama Artis</p>
+          <span id="dl-modal-status" class="inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">Siap disimpan</span>
+        </div>
+      </div>
+
+      <!-- Download Options -->
+      <div class="space-y-2.5">
+        <!-- Opsi 1: Simpan ke Offline PWA (IndexedDB) -->
+        <div class="p-3.5 rounded-2xl glass-panel border border-amber-500/30 hover:border-amber-500 transition-all cursor-pointer group" onclick="window.App.confirmSaveOffline()">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <i data-lucide="cloud-off" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h5 class="text-xs font-bold text-white">Simpan ke Perpustakaan Offline PWA ⚡</h5>
+                <p class="text-[10px] text-slate-400">Putar di iPhone & Android tanpa kuota/internet.</p>
+              </div>
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all"></i>
+          </div>
+          <!-- Progress bar -->
+          <div id="dl-progress-bar-container" class="mt-3 hidden">
+            <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div id="dl-progress-bar" class="h-full bg-gradient-to-r from-amber-500 to-emerald-400 w-0 transition-all duration-300"></div>
+            </div>
+            <p id="dl-progress-text" class="text-[10px] text-slate-400 mt-1 text-right font-mono">Menyimpan...</p>
+          </div>
+        </div>
+
+        <!-- Opsi 2: Download File MP3 ke HP / Komputer -->
+        <div class="p-3.5 rounded-2xl glass-panel border border-white/5 hover:border-emerald-500/40 transition-all cursor-pointer group" onclick="window.App.confirmDownloadFile()">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <i data-lucide="file-audio" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h5 class="text-xs font-bold text-white">Unduh File Audio ke HP / Laptop</h5>
+                <p class="text-[10px] text-slate-400">Simpan berkas audio ke folder download perangkat.</p>
+              </div>
+            </div>
+            <i data-lucide="external-link" class="w-4 h-4 text-slate-400 group-hover:text-emerald-400 transition-colors"></i>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 9. Floating Context Menu -->
   <div id="track-action-menu" class="fixed z-50 w-56 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden animate-fadeIn">
     <div class="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
       Tambahkan ke Playlist:

@@ -6,6 +6,8 @@ import { MusicAPI, RADIO_STATIONS, STARTER_HITS } from './api.js';
 import { Player, EQ_PRESETS } from './audio.js';
 import { Visualizer } from './visualizer.js';
 import { Storage } from './storage.js';
+import { OfflineStorage } from './offline.js';
+import { Recommendations } from './recommendations.js';
 
 // Application State
 const AppState = {
@@ -23,7 +25,10 @@ const AppState = {
   isQueueDrawerOpen: false,
   sleepTimerTimeout: null,
   sleepTimerInterval: null,
-  sleepTimerSecondsLeft: 0
+  sleepTimerSecondsLeft: 0,
+  offlineTracks: [],
+  pendingDownloadTrack: null,
+  currentDrawerTab: 'queue'
 };
 
 // PWA Installation State & Events
@@ -124,6 +129,9 @@ function switchView(viewName, meta = null) {
     case 'history':
       renderHistoryView();
       break;
+    case 'offline':
+      renderOfflineView();
+      break;
     case 'search':
       renderSearchView(meta || '');
       break;
@@ -202,6 +210,25 @@ async function renderDiscoverView() {
         </div>
       </div>
 
+      <!-- Rekomendasi Pintar Untukmu (Based on History & Taste) -->
+      <div class="space-y-4" id="recommendations-container">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+              <i data-lucide="sparkles" class="w-5 h-5 text-amber-400"></i> Rekomendasi Untukmu
+            </h2>
+            <p id="rec-reason-text" class="text-xs text-slate-400 mt-0.5">Saran lagu cerdas berdasarkan apa yang sering kamu dengar</p>
+          </div>
+          <button onclick="window.App.refreshPersonalizedRecommendations()" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-panel hover:bg-white/5 transition-all">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Segarkan
+          </button>
+        </div>
+
+        <div id="recommendations-tracks-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          ${renderTrackSkeletons(5)}
+        </div>
+      </div>
+
       <!-- Main Trending Grid -->
       <div class="space-y-4">
         <div class="flex items-center justify-between">
@@ -246,8 +273,28 @@ async function renderDiscoverView() {
     if (heroBtn && tracks.length > 0) {
       heroBtn.onclick = () => Player.playTrack(tracks[0], tracks);
     }
+
+    // Muat rekomendasi personal
+    loadRecommendationsSection();
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function loadRecommendationsSection() {
+  try {
+    const recData = await Recommendations.getPersonalizedRecommendations(10);
+    const reasonEl = document.getElementById('rec-reason-text');
+    if (reasonEl && recData.reason) {
+      reasonEl.textContent = recData.reason;
+    }
+    const recGrid = document.getElementById('recommendations-tracks-grid');
+    if (recGrid && recData.tracks) {
+      recGrid.innerHTML = recData.tracks.map((t, idx) => renderTrackCard(t, idx, recData.tracks)).join('');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  } catch (e) {
+    console.warn('Gagal memuat rekomendasi:', e);
   }
 }
 
@@ -733,6 +780,212 @@ function renderHistoryView() {
   if (window.lucide) window.lucide.createIcons();
 }
 
+// 9. Offline Music View (PWA & Local IndexedDB)
+async function renderOfflineView() {
+  const container = document.getElementById('view-container');
+  container.innerHTML = `
+    <div class="space-y-6 animate-fadeIn pb-12">
+      <!-- Header -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 md:p-8 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/20 shadow-xl backdrop-blur-xl">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold">
+            <i data-lucide="cloud-off" class="w-3.5 h-3.5"></i> Mode 100% Offline Tanpa Kuota
+          </div>
+          <h1 class="text-2xl md:text-3xl font-extrabold text-white flex items-center gap-2.5">
+            <i data-lucide="hard-drive-download" class="w-7 h-7 text-amber-400"></i> Perpustakaan Lagu Offline
+          </h1>
+          <p class="text-xs md:text-sm text-slate-300 max-w-2xl leading-relaxed">
+            Lagu yang tersimpan di sini berada di penyimpanan lokal browser/PWA Anda. Tetap bisa diputar lancar saat <span class="text-amber-300 font-semibold">Mode Pesawat</span> atau ketika tidak ada sinyal internet sama sekali.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md glow-primary transition-all flex items-center gap-2 cursor-pointer">
+            <i data-lucide="upload" class="w-4 h-4"></i> Tambah MP3 Manual
+            <input type="file" id="offline-file-input" accept="audio/*" multiple class="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Storage & Controls Bar -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl glass-panel text-xs">
+        <div class="flex items-center gap-3 text-slate-300">
+          <span id="offline-storage-info" class="flex items-center gap-1.5 font-medium">
+            <i data-lucide="database" class="w-4 h-4 text-amber-400"></i> Memuat data penyimpanan...
+          </span>
+        </div>
+        <button onclick="window.App.playAllOfflineTracks()" id="btn-play-all-offline" class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition-all flex items-center justify-center gap-2 shadow-md">
+          <i data-lucide="play" class="w-4 h-4 fill-current"></i> Putar Semua Lagu Offline
+        </button>
+      </div>
+
+      <!-- Offline Tracks Container -->
+      <div id="offline-tracks-container">
+        <div class="flex items-center justify-center py-20 text-slate-400 text-xs">
+          <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-amber-400"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+
+  const fileInput = document.getElementById('offline-file-input');
+  if (fileInput) {
+    fileInput.onchange = async (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        await handleOfflineFilesUpload(e.target.files);
+      }
+    };
+  }
+
+  await loadAndRenderOfflineTracks();
+}
+
+async function handleOfflineFilesUpload(files) {
+  const audioFiles = Array.from(files).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac)$/i.test(f.name));
+  if (audioFiles.length === 0) {
+    showToast('Pilih berkas audio yang valid (.mp3, .wav, .m4a)', 'error');
+    return;
+  }
+
+  showToast(`Menyimpan ${audioFiles.length} lagu ke memori offline...`, 'info');
+
+  for (const file of audioFiles) {
+    let nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+    let artist = 'File Lokal Offline';
+    let title = nameWithoutExt;
+
+    if (nameWithoutExt.includes(' - ')) {
+      const parts = nameWithoutExt.split(' - ');
+      artist = parts[0].trim();
+      title = parts.slice(1).join(' - ').trim();
+    }
+
+    const track = {
+      id: 'offline-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      title: title,
+      artist: artist,
+      genre: 'Offline Local',
+      duration: 210,
+      durationStr: 'Audio',
+      artwork: 'icons/icon-192.png',
+      isOffline: true,
+      source: 'offline'
+    };
+
+    await OfflineStorage.saveTrack(track, file);
+  }
+
+  showToast(`Berhasil menyimpan ${audioFiles.length} lagu offline!`, 'success');
+  await loadAndRenderOfflineTracks();
+  await updateOfflineBadgeCount();
+}
+
+async function loadAndRenderOfflineTracks() {
+  const container = document.getElementById('offline-tracks-container');
+  const storageInfo = document.getElementById('offline-storage-info');
+  const tracks = await OfflineStorage.getAllTracks();
+  AppState.offlineTracks = tracks;
+
+  const usage = await OfflineStorage.getStorageUsage();
+  if (storageInfo) {
+    storageInfo.innerHTML = `
+      <i data-lucide="database" class="w-4 h-4 text-amber-400"></i>
+      <span>Tersimpan: <b class="text-white">${usage.count} Lagu</b> (${usage.mb})</span>
+    `;
+  }
+
+  if (!container) return;
+
+  if (tracks.length === 0) {
+    container.innerHTML = `
+      <div class="py-20 text-center glass-panel rounded-3xl p-8 space-y-4 border border-dashed border-white/15">
+        <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+          <i data-lucide="cloud-off" class="w-8 h-8"></i>
+        </div>
+        <div class="space-y-1">
+          <h3 class="text-lg font-bold text-white">Belum Ada Lagu Offline</h3>
+          <p class="text-xs text-slate-400 max-w-md mx-auto">
+            Klik tombol download (<i data-lucide="download" class="w-3.5 h-3.5 inline text-amber-400"></i>) pada lagu manapun di Discover atau unggah file MP3 untuk diputar tanpa kuota internet.
+          </p>
+        </div>
+        <button onclick="window.App.switchView('discover')" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md transition-all">
+          Cari Lagu untuk Di-download
+        </button>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="space-y-2">
+      ${tracks.map((t, idx) => renderOfflineTrackRow(t, idx, tracks)).join('')}
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function renderOfflineTrackRow(track, index, trackList) {
+  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+
+  return `
+    <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-amber-500/50 bg-amber-950/20 active-track-glow' : ''}">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <div class="w-7 text-center text-xs text-slate-400 font-medium">
+          ${isCurrentlyPlaying && Player.isPlaying ? `
+            <div class="flex items-center justify-center">
+              <span class="playing-bar bg-amber-400"></span>
+              <span class="playing-bar bg-amber-400"></span>
+              <span class="playing-bar bg-amber-400"></span>
+            </div>
+          ` : `${index + 1}`}
+        </div>
+
+        <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
+          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${track.title}" class="w-full h-full object-cover" loading="lazy" />
+          <button onclick='window.App.playOfflineTrack(${trackJson}, ${index})' class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+            <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
+          </button>
+        </div>
+
+        <div class="min-w-0 flex-1">
+          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-amber-400 font-bold' : 'text-slate-100'}">${track.title}</h4>
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">Offline</span>
+            <p class="text-xs text-slate-400 truncate">${track.artist}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 ml-4">
+        <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
+        
+        <button onclick="window.App.deleteOfflineTrack('${track.id}')" title="Hapus dari penyimpanan offline" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function updateOfflineBadgeCount() {
+  try {
+    const tracks = await OfflineStorage.getAllTracks();
+    const badge = document.getElementById('offline-badge-count');
+    if (badge) {
+      if (tracks.length > 0) {
+        badge.textContent = tracks.length;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+  } catch (e) {}
+}
+
 // --- Component Templates ---
 
 function renderTrackSkeletons(count = 8) {
@@ -770,6 +1023,10 @@ function renderTrackCard(track, index, trackList) {
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-5 h-5 fill-current ml-0.5"></i>
           </button>
         </div>
+
+        <button onclick='event.stopPropagation(); window.App.openDownloadModal(${trackJson})' title="Download / Simpan Offline" class="absolute top-2 left-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-amber-400 transition-colors">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
 
         <button onclick='window.App.toggleLike(${trackJson}, this)' class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
@@ -822,9 +1079,13 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
         </div>
       </div>
 
-      <div class="flex items-center gap-3 ml-4">
+      <div class="flex items-center gap-2 sm:gap-3 ml-4">
         <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
         
+        <button onclick='event.stopPropagation(); window.App.openDownloadModal(${trackJson})' title="Download / Simpan Offline" class="p-2 text-slate-400 hover:text-amber-400 transition-colors">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
+
         <button onclick='window.App.toggleLike(${trackJson}, this)' class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
@@ -894,6 +1155,9 @@ function setupPlayerSync() {
 
     if (window.lucide) window.lucide.createIcons();
     updateQueueDrawer();
+    if (AppState.currentDrawerTab === 'similar') {
+      renderSimilarTracksInDrawer();
+    }
   });
 
   Player.on('timeUpdate', ({ currentTime, duration }) => {
@@ -935,6 +1199,38 @@ function setupPlayerSync() {
 
   Player.on('queueChange', () => {
     updateQueueDrawer();
+  });
+
+  // Autoplay Rekomendasi Cerdas saat antrean selesai
+  Player.on('queueEnded', async ({ lastTrack, queue }) => {
+    if (Player.autoPlayRecommendations && navigator.onLine) {
+      try {
+        const nextTrack = await Recommendations.getAutoPlayTrack(queue, Storage.getHistory());
+        if (nextTrack) {
+          showToast(`Lanjut otomatis rekomendasi: ${nextTrack.title}`, 'info');
+          Player.playTrack(nextTrack);
+        }
+      } catch (e) {
+        console.warn('Autoplay error:', e);
+      }
+    }
+  });
+
+  // Listener status koneksi jaringan
+  Player.on('networkChange', ({ isOnline }) => {
+    const badge = document.getElementById('network-status-badge');
+    if (badge) {
+      if (isOnline) {
+        badge.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span>Online</span>';
+        showToast('Koneksi internet aktif kembali 🟢', 'success');
+      } else {
+        badge.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span><span>Mode Offline</span>';
+        showToast('Anda sedang offline. Menampilkan lagu tersimpan 💾', 'info');
+        switchView('offline');
+      }
+    }
   });
 
   // Shuffle & Repeat
@@ -1067,6 +1363,73 @@ function updateQueueDrawer() {
     if (countLabel) {
       countLabel.innerText = `${upcoming.length} Lagu berikutnya`;
     }
+    const tabCount = document.getElementById('drawer-queue-tab-count');
+    if (tabCount) {
+      tabCount.innerText = upcoming.length;
+    }
+  }
+}
+
+// Render similar tracks tab in Queue Drawer
+async function renderSimilarTracksInDrawer() {
+  const container = document.getElementById('drawer-similar-list');
+  if (!container) return;
+
+  const current = Player.currentTrack;
+  if (!current) {
+    container.innerHTML = `
+      <div class="py-8 text-center text-xs text-slate-500">
+        Putar sebuah lagu untuk melihat rekomendasi lagu yang mirip!
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="py-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+      <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+      <span>Mencari lagu yang mirip dengan <strong>${current.title}</strong>...</span>
+    </div>
+  `;
+
+  try {
+    const similarTracks = await Recommendations.getSimilarTracks(current, 10);
+    if (!similarTracks || similarTracks.length === 0) {
+      container.innerHTML = `
+        <div class="py-8 text-center text-xs text-slate-500">
+          Belum menemukan lagu serupa. Coba putar lagu lain!
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = similarTracks.map((t, idx) => {
+      const trackJson = JSON.stringify(t).replace(/'/g, "&#39;");
+      return `
+        <div class="flex items-center gap-3 p-2 rounded-xl glass-panel hover:bg-indigo-600/30 transition-colors group">
+          <img src="${t.artwork}" alt="${t.title}" class="w-9 h-9 rounded-lg object-cover" />
+          <div class="min-w-0 flex-1 cursor-pointer" onclick='window.App.playSimilarTrackDirect(${trackJson})'>
+            <h5 class="text-xs font-semibold text-slate-200 truncate group-hover:text-white">${t.title}</h5>
+            <p class="text-[10px] text-slate-400 truncate">${t.artist}</p>
+          </div>
+          <div class="flex items-center gap-1">
+            <button onclick='window.App.addSimilarTrackToQueue(${trackJson})' title="Tambah ke antrean" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+              <i data-lucide="list-plus" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick='window.App.openDownloadModal(${trackJson})' title="Download / Offline" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-white/10 transition-colors">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    if (window.lucide) window.lucide.createIcons();
+  } catch (err) {
+    container.innerHTML = `
+      <div class="py-8 text-center text-xs text-rose-400">
+        Gagal memuat rekomendasi lagu serupa.
+      </div>
+    `;
   }
 }
 
@@ -1602,6 +1965,187 @@ window.App = {
       document.execCommand('copy');
       showToast('Tautan disalin ke clipboard!', 'success');
     }
+  },
+
+  // Queue Drawer Tab Switcher
+  switchDrawerTab(tab) {
+    AppState.currentDrawerTab = tab;
+    const tabQueue = document.getElementById('drawer-tab-queue');
+    const tabSimilar = document.getElementById('drawer-tab-similar');
+    const queueList = document.getElementById('drawer-queue-list');
+    const similarList = document.getElementById('drawer-similar-list');
+
+    if (tab === 'similar') {
+      if (tabSimilar) {
+        tabSimilar.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1';
+      }
+      if (tabQueue) {
+        tabQueue.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      }
+      if (queueList) queueList.classList.add('hidden');
+      if (similarList) {
+        similarList.classList.remove('hidden');
+        renderSimilarTracksInDrawer();
+      }
+    } else {
+      if (tabQueue) {
+        tabQueue.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+      }
+      if (tabSimilar) {
+        tabSimilar.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1';
+      }
+      if (queueList) queueList.classList.remove('hidden');
+      if (similarList) similarList.classList.add('hidden');
+    }
+  },
+
+  async refreshPersonalizedRecommendations() {
+    await loadRecommendationsSection();
+    showToast('Rekomendasi berhasil diperbarui!', 'success');
+  },
+
+  playSimilarTrackDirect(track) {
+    Player.playTrack(track);
+    showToast(`Memutar: ${track.title}`, 'success');
+  },
+
+  addSimilarTrackToQueue(track) {
+    Player.addToQueue(track);
+    showToast(`Ditambahkan ke antrean: ${track.title}`, 'info');
+    updateQueueDrawer();
+  },
+
+  // Offline & Download Management
+  async openDownloadModal(track) {
+    if (!track) {
+      if (Player.currentTrack) track = Player.currentTrack;
+      else {
+        showToast('Pilih lagu yang ingin di-download terlebih dahulu', 'error');
+        return;
+      }
+    }
+    AppState.pendingDownloadTrack = track;
+    const modal = document.getElementById('track-download-modal');
+    if (!modal) return;
+
+    const art = document.getElementById('dl-modal-art');
+    const title = document.getElementById('dl-modal-title');
+    const artist = document.getElementById('dl-modal-artist');
+    const status = document.getElementById('dl-modal-status');
+    const progressContainer = document.getElementById('dl-progress-bar-container');
+
+    if (art) art.src = track.artwork || 'icons/icon-192.png';
+    if (title) title.innerText = track.title || 'Judul Lagu';
+    if (artist) artist.innerText = track.artist || 'Artis';
+
+    if (progressContainer) progressContainer.classList.add('hidden');
+
+    try {
+      const isSaved = await OfflineStorage.isTrackSaved(track.id);
+      if (status) {
+        if (isSaved) {
+          status.innerText = 'Sudah tersimpan di Offline PWA ✅';
+          status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono';
+        } else {
+          status.innerText = 'Siap disimpan untuk mode offline';
+          status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono';
+        }
+      }
+    } catch (e) {
+      if (status) {
+        status.innerText = 'Siap disimpan';
+        status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono';
+      }
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  async confirmSaveOffline() {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+
+    const progressContainer = document.getElementById('dl-progress-bar-container');
+    const progressBar = document.getElementById('dl-progress-bar');
+    const progressText = document.getElementById('dl-progress-text');
+    const status = document.getElementById('dl-modal-status');
+
+    if (progressContainer) progressContainer.classList.remove('hidden');
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.innerText = 'Menyiapkan audio...';
+
+    try {
+      await OfflineStorage.saveTrack(track, (percent) => {
+        if (progressBar) progressBar.style.width = `${percent}%`;
+        if (progressText) progressText.innerText = `Menyimpan ${percent}%...`;
+      });
+
+      if (progressBar) progressBar.style.width = '100%';
+      if (progressText) progressText.innerText = 'Selesai tersimpan! 💾';
+      if (status) {
+        status.innerText = 'Sudah tersimpan di Offline PWA ✅';
+        status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono';
+      }
+
+      await updateOfflineBadgeCount();
+      if (AppState.currentView === 'offline') {
+        await loadAndRenderOfflineTracks();
+      }
+
+      showToast(`"${track.title}" berhasil disimpan di Offline PWA! Bisa diputar tanpa kuota 🎉`, 'success');
+
+      setTimeout(() => {
+        const modal = document.getElementById('track-download-modal');
+        if (modal) modal.classList.add('hidden');
+      }, 900);
+    } catch (err) {
+      console.error('Gagal menyimpan offline:', err);
+      if (progressText) progressText.innerText = 'Gagal menyimpan audio';
+      showToast(err.message || 'Gagal menyimpan lagu ke offline', 'error');
+    }
+  },
+
+  async confirmDownloadFile() {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+
+    try {
+      await OfflineStorage.downloadToDevice(track);
+      showToast(`Mengunduh file audio "${track.title}" ke penyimpanan perangkat...`, 'success');
+      const modal = document.getElementById('track-download-modal');
+      if (modal) modal.classList.add('hidden');
+    } catch (err) {
+      showToast('Gagal mengunduh file: ' + err.message, 'error');
+    }
+  },
+
+  async deleteOfflineTrack(id) {
+    if (!confirm('Hapus lagu ini dari perpustakaan offline?')) return;
+    try {
+      await OfflineStorage.deleteTrack(id);
+      showToast('Lagu berhasil dihapus dari offline', 'info');
+      await updateOfflineBadgeCount();
+      await loadAndRenderOfflineTracks();
+    } catch (err) {
+      showToast('Gagal menghapus lagu: ' + err.message, 'error');
+    }
+  },
+
+  playOfflineTrack(track, index) {
+    if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
+      Player.togglePlay();
+    } else {
+      Player.playTrack(track, AppState.offlineTracks);
+    }
+  },
+
+  playAllOfflineTracks() {
+    if (AppState.offlineTracks && AppState.offlineTracks.length > 0) {
+      Player.playTrack(AppState.offlineTracks[0], AppState.offlineTracks);
+    } else {
+      showToast('Belum ada lagu offline tersimpan', 'info');
+    }
   }
 };
 
@@ -1676,6 +2220,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEqualizer();
   setupFullscreenOverlay();
   setupKeyboardShortcuts();
+  updateOfflineBadgeCount();
 
   // Service Worker Registration for PWA & Offline Caching
   if ('serviceWorker' in navigator) {
