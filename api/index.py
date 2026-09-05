@@ -264,7 +264,43 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'success', 'data': suggestions}).encode('utf-8'))
             return
 
-        # 4. API Network Info / Health check
+        # 4. API Lyrics
+        if '/lyrics' in path or '/lyrics' in req_path or action == 'lyrics':
+            q = query_params.get('q', [''])[0].strip()
+            track = query_params.get('track', [''])[0].strip()
+            artist = query_params.get('artist', [''])[0].strip()
+
+            clean_t = re.sub(r'[\(\[\{].*?(official|music video|video|lyric|audio|visualizer|mv|lirik|remastered|hd|4k|hq).*?[\)\]\}]', '', track or q, flags=re.IGNORECASE)
+            clean_t = re.sub(r'\|\s*(official|music video|video|audio).*', '', clean_t, flags=re.IGNORECASE)
+            clean_t = re.sub(r'\s+', ' ', clean_t).strip()
+            if artist and artist.lower() in clean_t.lower():
+                clean_t = re.sub(re.escape(artist), '', clean_t, flags=re.IGNORECASE).strip(' -:|')
+
+            search_str = q if q else (f"{artist} {clean_t}".strip() if artist else clean_t)
+            headers = {'User-Agent': 'HarmoniX-Music/1.0'}
+            result = None
+
+            try:
+                s_url = 'https://lrclib.net/api/search?q=' + urllib.parse.quote(search_str)
+                req = urllib.request.Request(s_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as res:
+                    data = json.loads(res.read().decode('utf-8'))
+                    if data and isinstance(data, list) and len(data) > 0:
+                        synced = [item for item in data if item.get('syncedLyrics')]
+                        result = synced[0] if synced else data[0]
+            except Exception as e:
+                print('lrclib search error:', e)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            if result:
+                self.wfile.write(json.dumps({'status': 'success', 'data': result}).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({'status': 'not_found', 'message': 'Lirik tidak ditemukan'}).encode('utf-8'))
+            return
+
+        # 5. API Network Info / Health check
         if '/network-info' in path or '/network-info' in req_path or action == 'network-info':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
