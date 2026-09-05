@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.gradle/
+.idea/
+android/app/build/
+android/build/
+local.properties
+HarmoniX-Music.apk
+_shortcut_temp.vbs

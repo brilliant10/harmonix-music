@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>HarmoniX - Pemutar & Streaming Musik Gratis</title>
+  
+  <!-- PWA Manifest & Android Mobile Meta -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#050811" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="application-name" content="HarmoniX" />
+  <meta name="apple-mobile-web-app-title" content="HarmoniX" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            display: ['"Outfit"', 'sans-serif'],
+          },
+          colors: {
+            dark: {
+              950: '#050811',
+              900: '#0a0f1d',
+              800: '#11182c',
+              700: '#1a233e',
+              600: '#253256'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Official YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <!-- Custom Styles, Aurora & Glassmorphism -->
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+
+<body class="bg-[#050811] text-slate-100 h-screen w-screen overflow-hidden antialiased selection:bg-indigo-500 selection:text-white relative">
+
+  <!-- Dynamic Ambient Aurora Mesh Background -->
+  <div class="aurora-bg">
+    <div class="aurora-orb orb-1"></div>
+    <div class="aurora-orb orb-2"></div>
+    <div class="aurora-orb orb-3"></div>
+  </div>
+
+  <!-- Main Application Wrapper -->
+  <div class="relative z-10 flex h-full w-full overflow-hidden pb-24">
+    
+    <!-- Left Sidebar Navigation -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-64 h-full shrink-0 glass-panel flex flex-col justify-between p-5 transition-transform duration-300 -translate-x-full md:translate-x-0 border-r border-white/5 overflow-y-auto">
+      
+      <div class="space-y-6">
+        <!-- Logo & Branding -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3 cursor-pointer group" onclick="window.App.switchView('discover')">
+            <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-cyan-400 flex items-center justify-center shadow-lg glow-primary group-hover:scale-105 transition-transform">
+              <i data-lucide="waves" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+              <span class="font-display font-extrabold text-xl tracking-tight text-gradient">HarmoniX</span>
+              <span class="block text-[10px] text-slate-400 font-bold -mt-1 tracking-widest uppercase">Music Universe</span>
+            </div>
+          </div>
+          <!-- Close button for mobile -->
+          <button id="close-sidebar-btn" class="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Navigation: Menu Utama -->
+        <nav class="space-y-1">
+          <div class="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <span>Menu Utama</span>
+          </div>
+          
+          <button data-nav="discover" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="compass" class="w-4 h-4"></i>
+            <span>Discover</span>
+          </button>
+
+          <button data-nav="genres" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="disc-3" class="w-4 h-4"></i>
+            <span>Genre & Kategori</span>
+          </button>
+
+          <button data-nav="radio" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="radio" class="w-4 h-4 text-rose-400"></i>
+            <span class="flex-1 text-left">Radio 24/7</span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold animate-pulse">LIVE</span>
+          </button>
+        </nav>
+
+        <!-- Navigation: Koleksi Musik -->
+        <nav class="space-y-1 pt-3 border-t border-white/5">
+          <div class="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Koleksi Saya</div>
+
+          <button data-nav="local" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="folder-music" class="w-4 h-4 text-cyan-400"></i>
+            <span>Musik Lokal</span>
+          </button>
+
+          <button data-nav="favorites" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="heart" class="w-4 h-4 text-rose-400"></i>
+            <span>Lagu Favorit</span>
+          </button>
+
+          <button data-nav="playlists" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="library" class="w-4 h-4 text-indigo-400"></i>
+            <span>Playlist Saya</span>
+          </button>
+
+          <button data-nav="history" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
+            <i data-lucide="history" class="w-4 h-4 text-emerald-400"></i>
+            <span>Riwayat Terakhir</span>
+          </button>
+        </nav>
+
+        <!-- Sidebar PWA Download Box -->
+        <div id="sidebar-install-box" class="p-3.5 rounded-2xl glass-card border border-indigo-500/30 text-center space-y-2.5 mt-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-600/25 text-indigo-400 flex items-center justify-center mx-auto shadow-md glow-primary">
+            <i data-lucide="arrow-down-to-line" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-white">Download Aplikasi</h4>
+            <p class="text-[10px] text-slate-400 mt-0.5">Pasang HarmoniX di Desktop Windows tanpa browser.</p>
+          </div>
+          <button onclick="window.App.installPWA()" class="w-full py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md transition-all flex items-center justify-center gap-1.5 glow-primary">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Download App
+          </button>
+          <button onclick="window.App.openMobileModal()" class="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 border border-emerald-500/30">
+            <i data-lucide="smartphone" class="w-3.5 h-3.5 text-emerald-400"></i> iPhone & Android 📱
+          </button>
+        </div>
+      </div>
+
+      <!-- Mini Visualizer Card -->
+      <div class="glass-card rounded-2xl p-3 border border-white/5 mt-6">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+            <i data-lucide="activity" class="w-3.5 h-3.5 text-indigo-400"></i> Spectrum
+          </span>
+          <button onclick="window.App.toggleVisualizerMode()" class="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors">
+            Ganti Mode
+          </button>
+        </div>
+        <div class="w-full h-14 rounded-xl overflow-hidden bg-slate-950/80 border border-white/5">
+          <canvas id="visualizer-canvas"></canvas>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Center Content View Area -->
+    <div class="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
+      
+      <!-- Top Navigation Header -->
+      <header class="h-20 shrink-0 glass-panel border-b border-white/5 flex items-center justify-between px-5 md:px-8 gap-4 z-20">
+        <div class="flex items-center gap-3 flex-1 max-w-xl">
+          <!-- Mobile Toggle -->
+          <button id="mobile-menu-toggle" class="md:hidden p-2 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white border border-white/10">
+            <i data-lucide="menu" class="w-5 h-5"></i>
+          </button>
+
+          <!-- Search Bar with Autocomplete -->
+          <div class="relative flex-1">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input 
+              id="global-search-input" 
+              type="text" 
+              autocomplete="off"
+              placeholder="Cari jutaan lagu YouTube, artis, atau tempel link..." 
+              class="w-full pl-11 pr-12 py-2.5 rounded-2xl bg-slate-900/85 border border-white/10 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
+            />
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 hidden sm:inline-block">
+              /
+            </div>
+            
+            <!-- Live Autocomplete Dropdown -->
+            <div id="search-suggestions-box" class="absolute left-0 right-0 top-full mt-2 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden z-50 space-y-1 max-h-64 overflow-y-auto">
+              <!-- Injected via JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Tools -->
+        <div class="flex items-center gap-2">
+          <!-- PWA Download Header Button -->
+          <button id="btn-install-pwa" onclick="window.App.installPWA()" title="Download & Pasang HarmoniX Desktop" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg glow-primary transition-all">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span class="hidden sm:inline">Download App</span>
+          </button>
+
+          <!-- Mobile Phone Connect Button (iPhone & Android) -->
+          <button id="btn-open-mobile" onclick="window.App.openMobileModal()" title="Buka / Pasang di iPhone & Android" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl glass-panel hover:border-emerald-500/50 text-slate-300 hover:text-emerald-400 text-xs font-semibold transition-all">
+            <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i>
+            <span class="hidden md:inline">iPhone & Android</span>
+          </button>
+
+          <!-- Quick YouTube Link Button -->
+          <button onclick="window.App.openPasteLinkModal()" title="Putar dari Link YouTube" class="flex items-center gap-1.5 px-3 py-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-300 hover:text-indigo-400 text-xs font-semibold transition-all">
+            <i data-lucide="link" class="w-4 h-4 text-indigo-400"></i>
+            <span class="hidden lg:inline">Link YT</span>
+          </button>
+
+          <!-- Sleep Timer Button -->
+          <button id="btn-sleep-timer" onclick="window.App.openSleepTimerModal()" title="Pengatur Waktu Tidur" class="p-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-300 hover:text-indigo-400 transition-colors relative">
+            <i data-lucide="timer" class="w-5 h-5"></i>
+            <span id="sleep-timer-badge" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"></span>
+          </button>
+
+          <!-- Keyboard Shortcuts Info -->
+          <button onclick="window.App.openShortcutsModal()" title="Bantuan Tombol Shortcut (?)" class="hidden sm:flex p-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-400 hover:text-slate-200 text-xs font-bold transition-colors">
+            ?
+          </button>
+
+          <!-- Equalizer Button -->
+          <button id="btn-open-equalizer" title="Equalizer Audio" class="p-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-300 hover:text-indigo-400 transition-colors">
+            <i data-lucide="sliders" class="w-5 h-5"></i>
+          </button>
+
+          <!-- Up Next Queue Toggle Button -->
+          <button id="btn-toggle-queue" onclick="window.App.toggleQueueDrawer()" title="Antrean Lagu" class="p-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-300 hover:text-indigo-400 transition-colors relative">
+            <i data-lucide="list-music" class="w-5 h-5"></i>
+            <span id="queue-count-badge" class="hidden absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-indigo-600 text-[10px] font-bold text-white">0</span>
+          </button>
+
+          <!-- Fullscreen Mode -->
+          <button id="btn-open-fullscreen" title="Layar Penuh Now Playing" class="p-2.5 rounded-xl glass-panel hover:border-indigo-500/50 text-slate-300 hover:text-indigo-400 transition-colors">
+            <i data-lucide="maximize" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Scrollable Main View Content with min-h-0 and extra bottom padding -->
+      <main id="view-container" class="flex-1 min-h-0 overflow-y-auto p-5 md:p-8 space-y-8 scroll-smooth pb-36">
+        <!-- Injected via js/app.js -->
+      </main>
+
+    </div>
+
+    <!-- Right Drawer: Up Next Queue & Lyrics -->
+    <div id="queue-drawer" class="fixed inset-y-0 right-0 z-40 w-80 md:w-96 glass-modal border-l border-white/10 flex flex-col justify-between p-5 transform translate-x-full transition-transform duration-300 shadow-2xl">
+      <div class="flex items-center justify-between pb-4 border-b border-white/5">
+        <div class="flex items-center gap-2">
+          <i data-lucide="list-music" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-base font-bold text-white">Antrean Lagu (Up Next)</h3>
+        </div>
+        <button onclick="window.App.toggleQueueDrawer()" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Current Track Info in Drawer -->
+      <div id="drawer-current-track" class="py-4 border-b border-white/5">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Queue List -->
+      <div class="flex-1 overflow-y-auto py-3 space-y-2" id="drawer-queue-list">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Drawer Footer Action -->
+      <div class="pt-4 border-t border-white/5 flex items-center justify-between text-xs">
+        <span id="drawer-queue-count" class="text-slate-400">0 Lagu dalam antrean</span>
+        <button onclick="window.App.clearQueue()" class="text-rose-400 hover:text-rose-300 font-semibold">
+          Bersihkan Antrean
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Persistent Music Player Bar -->
+  <footer class="fixed bottom-0 inset-x-0 h-24 glass-panel border-t border-white/10 px-4 md:px-8 flex items-center justify-between gap-4 z-50 shadow-2xl">
+    
+    <!-- Left: Track Info & Artwork -->
+    <div class="flex items-center gap-3.5 min-w-0 w-1/4 max-w-[280px]">
+      <div class="relative w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 bg-slate-800 shadow-md border border-white/10 group cursor-pointer" onclick="document.getElementById('btn-open-fullscreen').click()">
+        <img id="player-art" src="https://i.ytimg.com/vi/9II3OGZETo4/hqdefault.jpg" alt="Cover" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+        <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+          <i data-lucide="maximize-2" class="w-4 h-4"></i>
+        </div>
+      </div>
+      <div class="min-w-0 flex-1">
+        <h4 id="player-title" class="text-sm font-bold text-white truncate cursor-pointer hover:text-indigo-400 transition-colors" onclick="document.getElementById('btn-open-fullscreen').click()">Pilih Lagu</h4>
+        <p id="player-artist" class="text-xs text-slate-400 truncate mt-0.5">HarmoniX Music</p>
+      </div>
+      <button id="player-like-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.toggleLike(window.Player.currentTrack, this)" class="p-1.5 text-slate-400 hover:text-rose-500 transition-colors flex-shrink-0">
+        <i data-lucide="heart" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Center: Playback Controls & Interactive Seekbar -->
+    <div class="flex-1 max-w-2xl flex flex-col items-center gap-1.5">
+      <div class="flex items-center gap-4">
+        <!-- Shuffle -->
+        <button id="player-shuffle-btn" title="Shuffle" class="p-2 text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="shuffle" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Previous -->
+        <button id="player-prev-btn" title="Lagu Sebelumnya" class="p-2 text-slate-300 hover:text-white transition-colors">
+          <i data-lucide="skip-back" class="w-5 h-5 fill-current"></i>
+        </button>
+
+        <!-- Big Play / Pause Button -->
+        <button id="player-play-btn" class="w-11 h-11 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white flex items-center justify-center shadow-lg glow-primary transform hover:scale-105 active:scale-95 transition-all">
+          <i data-lucide="play" class="w-5 h-5 fill-current ml-0.5 player-play-icon"></i>
+        </button>
+
+        <!-- Next -->
+        <button id="player-next-btn" title="Lagu Berikutnya" class="p-2 text-slate-300 hover:text-white transition-colors">
+          <i data-lucide="skip-forward" class="w-5 h-5 fill-current"></i>
+        </button>
+
+        <!-- Repeat -->
+        <button id="player-repeat-btn" title="Ulangi" class="p-2 text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="repeat" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Seek Bar with Hover Timestamp Tooltip -->
+      <div class="w-full flex items-center gap-3 text-xs text-slate-400 font-mono seek-container relative">
+        <span id="player-current-time">0:00</span>
+        <div class="relative flex-1 flex items-center">
+          <div id="seek-tooltip" class="seek-tooltip">0:00</div>
+          <input 
+            id="player-seek-slider" 
+            type="range" 
+            min="0" 
+            max="100" 
+            value="0" 
+            step="0.5" 
+            class="w-full h-1.5 accent-indigo-500" 
+          />
+        </div>
+        <span id="player-duration">0:00</span>
+      </div>
+    </div>
+
+    <!-- Right: Volume & Auxiliary Controls -->
+    <div class="flex items-center justify-end gap-3 w-1/4 max-w-[240px]">
+      <div class="hidden sm:flex items-center gap-2">
+        <button id="player-volume-btn" class="p-1.5 text-slate-400 hover:text-white transition-colors">
+          <i id="player-volume-icon" data-lucide="volume-2" class="w-4 h-4"></i>
+        </button>
+        <input 
+          id="player-volume-slider" 
+          type="range" 
+          min="0" 
+          max="100" 
+          value="80" 
+          class="w-20 h-1.5 accent-indigo-500" 
+        />
+      </div>
+    </div>
+
+  </footer>
+
+  <!-- ==================== MODALS & OVERLAYS ==================== -->
+
+  <!-- 1. Download App Information Modal -->
+  <div id="download-app-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-lg p-6 space-y-6 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="download" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-bold text-white">Download & Pasang HarmoniX</h3>
+        </div>
+        <button onclick="document.getElementById('download-app-modal').classList.add('hidden')" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs text-slate-300">
+        <!-- Option 1: PWA Desktop App -->
+        <div class="p-4 rounded-2xl glass-panel space-y-2 border border-indigo-500/30">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white text-sm flex items-center gap-2">
+              <i data-lucide="chrome" class="w-4 h-4 text-indigo-400"></i> Pasang Langsung via Browser (PWA)
+            </span>
+            <span class="badge-tag bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Direkomendasikan</span>
+          </div>
+          <p class="text-slate-400 leading-relaxed">
+            Pasang sebagai aplikasi mandiri di Desktop Windows tanpa bilah URL browser (seperti aplikasi Spotify resmi).
+          </p>
+          <button onclick="window.App.triggerBrowserInstallPrompt()" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-md glow-primary flex items-center justify-center gap-2">
+            <i data-lucide="download" class="w-4 h-4"></i> Pasang Aplikasi Sekarang (1-Klik)
+          </button>
+        </div>
+
+        <!-- Option 2: Windows Desktop Shortcut -->
+        <div class="p-4 rounded-2xl glass-panel space-y-2 border border-white/5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white text-sm flex items-center gap-2">
+              <i data-lucide="monitor" class="w-4 h-4 text-cyan-400"></i> Buat Pintasan Desktop Windows
+            </span>
+            <span class="badge-tag bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Offline</span>
+          </div>
+          <p class="text-slate-400 leading-relaxed">
+            Buat ikon pintasan langsung di layar Desktop Windows Anda (klik file <code class="text-indigo-300 font-mono">install_desktop_app.bat</code> di folder proyek).
+          </p>
+        </div>
+
+        <!-- Option 3: Smartphone (iPhone & Android) -->
+        <div class="p-4 rounded-2xl glass-panel space-y-2 border border-emerald-500/30">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white text-sm flex items-center gap-2">
+              <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i> Pasang di Smartphone (iPhone & Android)
+            </span>
+            <span class="badge-tag bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">iOS & Android</span>
+          </div>
+          <p class="text-slate-400 leading-relaxed">
+            Pasang langsung di iPhone (Safari PWA) atau Android (APK & WebAPK) dengan scan QR Code instan.
+          </p>
+          <button onclick="document.getElementById('download-app-modal').classList.add('hidden'); window.App.openMobileModal();" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition-all shadow-md flex items-center justify-center gap-2">
+            <i data-lucide="qr-code" class="w-4 h-4"></i> Buka QR Code untuk iPhone & Android
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1b. Mobile Install Modal for iPhone & Android (QR Code & LAN URL) -->
+  <div id="android-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl border border-emerald-500/30 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="smartphone" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Pasang di iPhone & Android</h3>
+            <p class="text-[11px] text-emerald-400 font-medium">Bisa Dipasang Jadi Aplikasi Resmi Mandiri</p>
+          </div>
+        </div>
+        <button onclick="document.getElementById('android-modal').classList.add('hidden')" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Platform Selector Tabs: iPhone vs Android -->
+      <div class="flex items-center p-1 rounded-2xl bg-slate-900 border border-white/10">
+        <button id="tab-btn-iphone" onclick="window.App.switchMobileTab('iphone')" class="flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md">
+          <i data-lucide="apple" class="w-4 h-4"></i> iPhone (iOS)
+        </button>
+        <button id="tab-btn-android" onclick="window.App.switchMobileTab('android')" class="flex-1 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i> Android
+        </button>
+      </div>
+
+      <!-- QR Code Display Box -->
+      <div class="p-4 rounded-2xl bg-white flex flex-col items-center justify-center shadow-xl border border-slate-200">
+        <div id="android-qr-container" class="w-44 h-44 flex items-center justify-center">
+          <img id="android-qr-image" src="" alt="Scan QR Code" class="w-44 h-44 object-contain" />
+        </div>
+        <span id="qr-scan-label" class="text-[10px] text-slate-600 mt-2 font-semibold">Buka Kamera iPhone Anda lalu arahkan ke QR Code ini</span>
+      </div>
+
+      <!-- URL link & Copy -->
+      <div class="space-y-1.5">
+        <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tautan Langsung (Wi-Fi Lokal):</label>
+        <div class="flex items-center gap-2">
+          <input id="android-direct-url" type="text" readonly class="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-white/10 text-xs text-emerald-400 font-mono select-all focus:outline-none" />
+          <button onclick="window.App.copyAndroidUrl()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i> Salin
+          </button>
+        </div>
+      </div>
+
+      <!-- Petunjuk iPhone (iOS) -->
+      <div id="section-iphone-guide" class="p-3.5 rounded-2xl glass-panel space-y-2 text-xs border border-indigo-500/30">
+        <div class="font-bold text-white flex items-center gap-1.5">
+          <i data-lucide="apple" class="w-4 h-4 text-indigo-400"></i> Cara Pasang Jadi Aplikasi di iPhone (iOS):
+        </div>
+        <ol class="list-decimal list-inside space-y-1.5 text-slate-300 text-[11px] leading-relaxed">
+          <li>Buka aplikasi <b class="text-white">Kamera bawaan iPhone</b>, arahkan ke QR Code di atas. Ketuk gelembung kuning bertuliskan <b class="text-indigo-300">"Buka di Safari"</b>.</li>
+          <li>Di Safari, ketuk tombol <b class="text-white">Bagikan / Share</b> (ikon kotak panah atas <span class="px-1.5 py-0.5 rounded bg-white/10 font-bold">⎋ / [↑]</span> di bilah bawah).</li>
+          <li>Gulir ke bawah, pilih menu <b class="text-indigo-300 font-semibold">"Tambahkan ke Layar Utama"</b> (*Add to Home Screen*).</li>
+          <li>Ketuk <b class="text-white font-bold">"Tambah"</b> di pojok kanan atas.</li>
+          <li><b class="text-emerald-400">Selesai!</b> Ikon HarmoniX akan muncul di Home Screen iPhone & berjalan layar penuh tanpa bilah Safari!</li>
+        </ol>
+      </div>
+
+      <!-- Petunjuk Android -->
+      <div id="section-android-guide" class="p-3.5 rounded-2xl glass-panel space-y-2 text-xs border border-emerald-500/30 hidden">
+        <div class="font-bold text-white flex items-center gap-1.5">
+          <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i> Cara Pasang Jadi Aplikasi di Android:
+        </div>
+        <ol class="list-decimal list-inside space-y-1.5 text-slate-300 text-[11px] leading-relaxed">
+          <li>Pastikan HP terhubung ke <b class="text-slate-200">Wi-Fi yang sama</b> dengan laptop ini.</li>
+          <li>Buka di <b class="text-emerald-400">Google Chrome</b>, ketuk titik tiga (⋮) > pilih <b class="text-white">"Tambahkan ke Layar Utama"</b> atau <b class="text-white">"Pasang Aplikasi"</b>.</li>
+          <li>Atau langsung download file installer <b class="text-white">APK</b> di bawah ini:</li>
+        </ol>
+        <a href="HarmoniX-Music.apk" download class="w-full mt-2 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i> Unduh File HarmoniX-Music.apk (5.5 MB)
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Paste YouTube Link Modal -->
+  <div id="youtube-link-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-lg p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="youtube" class="w-5 h-5 text-rose-500"></i> Putar Apapun dari YouTube
+        </h3>
+        <button onclick="document.getElementById('youtube-link-modal').classList.add('hidden')" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        Punya link lagu atau video dari YouTube? Cukup tempel tautannya di bawah untuk langsung memutarnya di HarmoniX.
+      </p>
+
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-300">Link YouTube / Video ID</label>
+        <input 
+          id="direct-yt-link-input" 
+          type="text" 
+          placeholder="Contoh: https://www.youtube.com/watch?v=... atau ID video" 
+          class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono text-xs" 
+        />
+      </div>
+
+      <div class="flex items-center justify-end gap-3 pt-2">
+        <button onclick="document.getElementById('youtube-link-modal').classList.add('hidden')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white">
+          Batal
+        </button>
+        <button onclick="window.App.submitDirectYoutubeLink()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md glow-primary flex items-center gap-2">
+          <i data-lucide="play" class="w-4 h-4 fill-current"></i> Putar Sekarang
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Sleep Timer Modal -->
+  <div id="sleep-timer-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="timer" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-base font-bold text-white">Pengatur Waktu Tidur</h3>
+        </div>
+        <button onclick="document.getElementById('sleep-timer-modal').classList.add('hidden')" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        Musik akan berhenti otomatis dan memudar secara halus saat timer habis.
+      </p>
+
+      <div class="grid grid-cols-2 gap-2.5">
+        <button onclick="window.App.setSleepTimer(15)" class="p-3 rounded-xl glass-panel hover:bg-indigo-600 hover:text-white text-xs font-semibold transition-all">
+          ⏱️ 15 Menit
+        </button>
+        <button onclick="window.App.setSleepTimer(30)" class="p-3 rounded-xl glass-panel hover:bg-indigo-600 hover:text-white text-xs font-semibold transition-all">
+          ⏱️ 30 Menit
+        </button>
+        <button onclick="window.App.setSleepTimer(45)" class="p-3 rounded-xl glass-panel hover:bg-indigo-600 hover:text-white text-xs font-semibold transition-all">
+          ⏱️ 45 Menit
+        </button>
+        <button onclick="window.App.setSleepTimer(60)" class="p-3 rounded-xl glass-panel hover:bg-indigo-600 hover:text-white text-xs font-semibold transition-all">
+          ⏱️ 60 Menit
+        </button>
+      </div>
+
+      <div class="pt-2 border-t border-white/5 flex items-center justify-between">
+        <span id="sleep-timer-status" class="text-xs text-slate-400 font-mono">Timer tidak aktif</span>
+        <button onclick="window.App.cancelSleepTimer()" class="text-xs text-rose-400 hover:text-rose-300 font-semibold">
+          Matikan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Keyboard Shortcuts Helper Modal -->
+  <div id="shortcuts-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="keyboard" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-base font-bold text-white">Tombol Shortcut Keyboard</h3>
+        </div>
+        <button onclick="document.getElementById('shortcuts-modal').classList.add('hidden')" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-2.5 text-xs text-slate-300">
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Putar / Jeda Lagu</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">Spasi</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Lompat ±5 Detik</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">← / →</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Naikkan / Turunkan Volume</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">↑ / ↓</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Bisukan / Unmute</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">M</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Mode Layar Penuh</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">F</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Sukai / Favoritkan Lagu</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">L</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Buka Antrean Lagu (Queue)</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">Q</kbd>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded-lg glass-panel">
+          <span>Fokus Pencarian Lagu</span>
+          <kbd class="px-2 py-1 rounded bg-white/10 font-mono font-bold">/</kbd>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Equalizer Modal -->
+  <div id="equalizer-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-lg p-6 space-y-6 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="sliders" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-lg font-bold text-white">Equalizer 5-Band Audio</h3>
+        </div>
+        <button id="btn-close-equalizer" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-2">
+        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Preset Cepat</label>
+        <div id="eq-presets-container" class="flex flex-wrap gap-2">
+          <!-- Injected via JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Fullscreen Now Playing Overlay -->
+  <div id="fullscreen-overlay" class="fixed inset-0 z-50 bg-[#050811] hidden flex flex-col justify-between p-6 md:p-12 overflow-hidden select-none">
+    
+    <div id="fullscreen-bg" class="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-30 scale-125 transform pointer-events-none transition-all duration-700"></div>
+    <div class="absolute inset-0 bg-black/60 pointer-events-none"></div>
+
+    <div class="relative z-10 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="waves" class="w-5 h-5 text-indigo-400"></i>
+        <span class="text-sm font-bold tracking-wider text-slate-300 uppercase">Now Playing</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="btn-toggle-video" onclick="window.App.toggleVideoMode()" class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors">
+          <i data-lucide="video" class="w-4 h-4 text-indigo-400"></i> Mode Video Klip
+        </button>
+        <button id="btn-close-fullscreen" class="p-2 rounded-2xl bg-white/10 hover:bg-white/20 text-white transition-colors">
+          <i data-lucide="minimize" class="w-6 h-6"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="relative z-10 flex flex-col items-center justify-center my-auto space-y-6">
+      
+      <!-- Video Frame Container -->
+      <div id="yt-player-wrapper" class="invisible-player">
+        <div id="yt-player-frame"></div>
+      </div>
+
+      <!-- Vinyl Record Container -->
+      <div id="fullscreen-record" class="relative w-64 h-64 md:w-80 md:h-80 rounded-full p-2 bg-gradient-to-tr from-slate-900 to-slate-800 shadow-2xl border-4 border-slate-700/50 rotate-record paused flex items-center justify-center">
+        <div class="w-full h-full rounded-full border border-white/5 flex items-center justify-center">
+          <div class="w-4/5 h-4/5 rounded-full border border-white/5 flex items-center justify-center">
+            <img id="fullscreen-art" src="https://i.ytimg.com/vi/9II3OGZETo4/hqdefault.jpg" alt="Cover" class="w-36 h-36 md:w-44 md:h-44 rounded-full object-cover shadow-xl border-4 border-indigo-500/50" />
+          </div>
+        </div>
+      </div>
+
+      <div class="text-center space-y-1 max-w-lg">
+        <h2 id="fullscreen-title" class="text-2xl md:text-3xl font-extrabold text-white truncate">Pilih Lagu</h2>
+        <p id="fullscreen-artist" class="text-base text-slate-400 truncate">HarmoniX Music</p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="relative z-10 max-w-2xl mx-auto w-full space-y-4">
+      <div class="w-full flex items-center gap-3 text-xs text-slate-400 font-mono">
+        <span id="fs-current-time">0:00</span>
+        <input id="fs-seek-slider" type="range" min="0" max="100" value="0" step="0.5" class="flex-1 h-2 accent-indigo-500" />
+        <span id="fs-duration">0:00</span>
+      </div>
+
+      <div class="flex items-center justify-center gap-6">
+        <button onclick="window.Player.prev()" class="p-3 text-slate-300 hover:text-white transition-colors">
+          <i data-lucide="skip-back" class="w-7 h-7 fill-current"></i>
+        </button>
+        <button onclick="window.Player.togglePlay()" class="w-16 h-16 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-2xl glow-primary transform hover:scale-105 active:scale-95 transition-all">
+          <i data-lucide="play" class="w-8 h-8 fill-current ml-0.5 player-play-icon"></i>
+        </button>
+        <button onclick="window.Player.next()" class="p-3 text-slate-300 hover:text-white transition-colors">
+          <i data-lucide="skip-forward" class="w-7 h-7 fill-current"></i>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 7. Create Playlist Modal -->
+  <div id="playlist-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-400"></i> Buat Playlist Baru
+        </h3>
+        <button onclick="document.getElementById('playlist-modal').classList.add('hidden')" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Nama Playlist</label>
+          <input id="new-playlist-name" type="text" placeholder="Misal: Senja Santai, Workout Hits..." class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Deskripsi (Opsional)</label>
+          <textarea id="new-playlist-desc" rows="2" placeholder="Catatan tentang playlist ini..." class="w-full px-4 py-2 rounded-xl bg-slate-900 border border-white/10 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-3 pt-2">
+        <button onclick="document.getElementById('playlist-modal').classList.add('hidden')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white">
+          Batal
+        </button>
+        <button onclick="window.App.createPlaylistSubmit()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md glow-primary">
+          Simpan Playlist
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Floating Context Menu -->
+  <div id="track-action-menu" class="fixed z-50 w-56 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden animate-fadeIn">
+    <div class="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+      Tambahkan ke Playlist:
+    </div>
+    <div id="track-menu-playlists" class="space-y-0.5 max-h-40 overflow-y-auto">
+      <!-- Populated via JS -->
+    </div>
+    <div class="pt-2 mt-2 border-t border-white/5">
+      <button onclick="window.App.downloadCurrentMenuTrack()" class="w-full text-left px-3 py-2 text-xs rounded-lg text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors flex items-center gap-2">
+        <i data-lucide="download" class="w-3.5 h-3.5"></i> Unduh File Audio
+      </button>
+    </div>
+  </div>
+
+  <!-- Main JavaScript App Entry -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

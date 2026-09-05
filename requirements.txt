@@ -1,0 +1,2 @@
+# HarmoniX Music Player Serverless Dependencies
+# Uses Python standard library (urllib, json, re, http.server)
