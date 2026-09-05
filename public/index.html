@@ -335,6 +335,9 @@
       <button id="player-download-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.openDownloadModal(window.Player.currentTrack)" title="Download / Simpan Offline" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors flex-shrink-0">
         <i data-lucide="download" class="w-5 h-5"></i>
       </button>
+      <button id="player-lyrics-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.openLyricsModal(window.Player.currentTrack); else window.App.openLyricsModal();" title="Lirik Lagu (Karaoke)" class="p-1.5 text-slate-400 hover:text-indigo-400 transition-colors flex-shrink-0">
+        <i data-lucide="mic-2" class="w-5 h-5"></i>
+      </button>
     </div>
 
     <!-- Center: Playback Controls & Interactive Seekbar -->
@@ -710,6 +713,9 @@
         <span class="text-sm font-bold tracking-wider text-slate-300 uppercase">Now Playing</span>
       </div>
       <div class="flex items-center gap-3">
+        <button id="btn-toggle-fs-lyrics" onclick="window.App.toggleFullscreenLyrics()" class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors">
+          <i data-lucide="mic-2" class="w-4 h-4 text-pink-400"></i> <span id="fs-lyrics-btn-text">Lirik</span>
+        </button>
         <button id="btn-toggle-video" onclick="window.App.toggleVideoMode()" class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors">
           <i data-lucide="video" class="w-4 h-4 text-indigo-400"></i> Mode Video Klip
         </button>
@@ -719,7 +725,7 @@
       </div>
     </div>
 
-    <div class="relative z-10 flex flex-col items-center justify-center my-auto space-y-6">
+    <div class="relative z-10 flex flex-col items-center justify-center my-auto space-y-6 w-full max-w-2xl mx-auto">
       
       <!-- Video Frame Container -->
       <div id="yt-player-wrapper" class="invisible-player">
@@ -735,7 +741,14 @@
         </div>
       </div>
 
-      <div class="text-center space-y-1 max-w-lg">
+      <!-- Fullscreen Synced Lyrics View (hidden by default) -->
+      <div id="fullscreen-lyrics-wrapper" class="hidden w-full h-72 md:h-80 overflow-y-auto scrollbar-none text-center px-4 py-4 space-y-4 select-text">
+        <div id="fs-lyrics-content" class="space-y-4">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+
+      <div id="fullscreen-track-meta" class="text-center space-y-1 max-w-lg">
         <h2 id="fullscreen-title" class="text-2xl md:text-3xl font-extrabold text-white truncate">Pilih Lagu</h2>
         <p id="fullscreen-artist" class="text-base text-slate-400 truncate">HarmoniX Music</p>
       </div>
@@ -865,6 +878,89 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- 8.5. Dedicated Lyrics Sheet / Modal (Karaoke & Plain Text) -->
+  <div id="lyrics-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex flex-col justify-between hidden animate-fadeIn select-none">
+    <!-- Dynamic Blurred Background from Album Art -->
+    <div id="lyrics-bg-art" class="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-25 scale-125 pointer-events-none transition-all duration-700"></div>
+    <div class="absolute inset-0 bg-gradient-to-b from-black/80 via-black/60 to-[#050811] pointer-events-none"></div>
+
+    <!-- Top Bar Header -->
+    <div class="relative z-10 p-4 md:px-8 md:py-5 border-b border-white/10 flex items-center justify-between">
+      <div class="flex items-center gap-3.5 min-w-0">
+        <img id="lyrics-modal-art" src="icons/icon-192.png" alt="Art" class="w-11 h-11 md:w-12 md:h-12 rounded-2xl object-cover shadow-lg border border-white/10 flex-shrink-0" />
+        <div class="min-w-0">
+          <h3 id="lyrics-modal-title" class="text-sm md:text-base font-bold text-white truncate">Judul Lagu</h3>
+          <p id="lyrics-modal-artist" class="text-xs text-slate-400 truncate">Nama Artis</p>
+        </div>
+      </div>
+
+      <!-- Controls & Actions -->
+      <div class="flex items-center gap-2">
+        <!-- Toggle Mode: Karaoke (Synced) vs Teks Lengkap (Plain) -->
+        <div class="flex items-center bg-white/10 p-1 rounded-xl border border-white/10 text-xs">
+          <button id="btn-lyrics-mode-synced" onclick="window.App.switchLyricsDisplayMode('synced')" class="px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1.5">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span class="hidden sm:inline">Karaoke</span>
+          </button>
+          <button id="btn-lyrics-mode-plain" onclick="window.App.switchLyricsDisplayMode('plain')" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all">
+            Teks
+          </button>
+        </div>
+
+        <!-- Manual Search Button -->
+        <button onclick="window.App.toggleLyricsSearchBar()" title="Cari lirik manual / ganti kata kunci" class="p-2 rounded-xl glass-panel text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Copy Lyrics Button -->
+        <button onclick="window.App.copyCurrentLyrics()" title="Salin lirik ke clipboard" class="p-2 rounded-xl glass-panel text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
+          <i data-lucide="copy" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Close Modal -->
+        <button onclick="window.App.closeLyricsModal()" class="p-2 rounded-xl glass-panel text-slate-400 hover:text-white hover:bg-rose-500/20 hover:text-rose-400 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Collapsible Manual Search Bar -->
+    <div id="lyrics-search-bar" class="relative z-10 px-4 md:px-8 py-2.5 bg-black/40 border-b border-white/5 hidden animate-fadeIn">
+      <form onsubmit="event.preventDefault(); window.App.searchLyricsManual();" class="flex items-center gap-2 max-w-xl mx-auto">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input id="lyrics-manual-input" type="text" placeholder="Ketik nama artis & judul lagu yang tepat..." class="w-full pl-9 pr-3 py-2 text-xs bg-slate-900/80 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all" />
+        </div>
+        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow">
+          Cari
+        </button>
+      </form>
+    </div>
+
+    <!-- Center: Lyrics Content Container -->
+    <div id="lyrics-scroll-container" class="relative z-10 flex-1 overflow-y-auto px-4 md:px-8 py-10 scroll-smooth select-text">
+      <div id="lyrics-content" class="max-w-2xl mx-auto space-y-4">
+        <!-- Dynamic lyrics content injected via JS -->
+      </div>
+    </div>
+
+    <!-- Bottom Mini Playback Controls in Lyrics Modal -->
+    <div class="relative z-10 p-4 md:px-8 border-t border-white/10 bg-black/60 backdrop-blur-md flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <button onclick="window.Player.togglePlay()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95">
+          <i data-lucide="play" class="w-5 h-5 fill-current ml-0.5 player-play-icon"></i>
+        </button>
+        <span class="text-xs text-slate-400 font-mono" id="lyrics-playback-timer">0:00 / 0:00</span>
+      </div>
+
+      <div class="text-[11px] text-slate-400 flex items-center gap-1.5">
+        <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-indigo-400"></i>
+        <span class="hidden sm:inline">Klik baris lirik untuk melompat ke posisi lagu</span>
+        <span class="sm:hidden">Sentuh lirik untuk melompat</span>
+      </div>
     </div>
   </div>
 

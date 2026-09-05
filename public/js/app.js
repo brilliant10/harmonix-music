@@ -8,6 +8,7 @@ import { Visualizer } from './visualizer.js';
 import { Storage } from './storage.js';
 import { OfflineStorage } from './offline.js';
 import { Recommendations } from './recommendations.js';
+import { Lyrics } from './lyrics.js';
 
 // Application State
 const AppState = {
@@ -28,7 +29,12 @@ const AppState = {
   sleepTimerSecondsLeft: 0,
   offlineTracks: [],
   pendingDownloadTrack: null,
-  currentDrawerTab: 'queue'
+  currentDrawerTab: 'queue',
+  isLyricsModalOpen: false,
+  isFullscreenLyricsActive: false,
+  lyricsDisplayMode: 'synced',
+  activeLyricLineIndex: -1,
+  lastAutoScroll: 0
 };
 
 // PWA Installation State & Events
@@ -1158,6 +1164,14 @@ function setupPlayerSync() {
     if (AppState.currentDrawerTab === 'similar') {
       renderSimilarTracksInDrawer();
     }
+
+    // Auto-update lyrics when track changes
+    if (AppState.isLyricsModalOpen) {
+      loadAndRenderLyrics(track);
+    }
+    if (AppState.isFullscreenLyricsActive) {
+      loadAndRenderFullscreenLyrics(track);
+    }
   });
 
   Player.on('timeUpdate', ({ currentTime, duration }) => {
@@ -1175,6 +1189,20 @@ function setupPlayerSync() {
     if (durationText) durationText.innerText = durStr;
     if (fsCurrentText) fsCurrentText.innerText = curStr;
     if (fsDurationText) fsDurationText.innerText = durStr;
+
+    // Update lyrics timer in modal
+    const lyricsTimer = document.getElementById('lyrics-playback-timer');
+    if (lyricsTimer) {
+      lyricsTimer.innerText = `${curStr} / ${durStr}`;
+    }
+
+    // Sync active lyric highlight
+    if (AppState.isLyricsModalOpen && AppState.lyricsDisplayMode === 'synced') {
+      syncLyricsHighlight(currentTime);
+    }
+    if (AppState.isFullscreenLyricsActive) {
+      syncFullscreenLyricsHighlight(currentTime);
+    }
 
     if (seekSlider && !seekSlider.dataset.dragging && duration > 0) {
       seekSlider.max = duration;
@@ -1430,6 +1458,230 @@ async function renderSimilarTracksInDrawer() {
         Gagal memuat rekomendasi lagu serupa.
       </div>
     `;
+  }
+}
+
+// ==================== LYRICS HANDLERS ====================
+
+async function loadAndRenderLyrics(track, customQuery = '') {
+  const modalArt = document.getElementById('lyrics-modal-art');
+  const modalTitle = document.getElementById('lyrics-modal-title');
+  const modalArtist = document.getElementById('lyrics-modal-artist');
+  const modalBg = document.getElementById('lyrics-bg-art');
+  const content = document.getElementById('lyrics-content');
+  const btnSynced = document.getElementById('btn-lyrics-mode-synced');
+  const btnPlain = document.getElementById('btn-lyrics-mode-plain');
+
+  if (!track && Player.currentTrack) track = Player.currentTrack;
+  if (!track) {
+    if (content) {
+      content.innerHTML = `
+        <div class="py-20 text-center text-slate-400 space-y-2">
+          <i data-lucide="music" class="w-8 h-8 text-slate-500 mx-auto"></i>
+          <p class="text-sm font-semibold">Pilih lagu untuk melihat lirik</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
+    return;
+  }
+
+  if (modalArt) modalArt.src = track.artwork || 'icons/icon-192.png';
+  if (modalTitle) modalTitle.innerText = track.title || 'Judul Lagu';
+  if (modalArtist) modalArtist.innerText = track.artist || 'Artis';
+  if (modalBg) modalBg.style.backgroundImage = `url('${track.artwork || ''}')`;
+
+  if (content) {
+    content.innerHTML = `
+      <div class="py-20 text-center text-slate-400 space-y-3">
+        <div class="w-7 h-7 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p class="text-sm font-medium">Mencari lirik untuk <span class="text-white font-bold">${track.title}</span>...</p>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  try {
+    const data = await Lyrics.fetchLyrics(track, customQuery);
+    if (!data || (!data.plainLyrics && !data.syncedLyrics)) {
+      if (content) {
+        content.innerHTML = `
+          <div class="py-20 text-center text-slate-400 space-y-4 max-w-md mx-auto">
+            <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-slate-400">
+              <i data-lucide="file-x" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h4 class="text-base font-bold text-white">Lirik Belum Tersedia</h4>
+              <p class="text-xs text-slate-400 mt-1">Kami belum menemukan lirik otomatis untuk lagu ini.</p>
+            </div>
+            <button onclick="window.App.toggleLyricsSearchBar(true)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md">
+              Coba Cari Manual 🔍
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+
+    // Jika lagu tidak memiliki synced lyrics, fallback ke plain
+    if (!data.isSynced && AppState.lyricsDisplayMode === 'synced') {
+      AppState.lyricsDisplayMode = 'plain';
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+    }
+
+    renderLyricsBody(data);
+  } catch (err) {
+    console.warn('Load lyrics error:', err);
+    if (content) {
+      content.innerHTML = `
+        <div class="py-20 text-center text-rose-400 space-y-2">
+          <p class="text-sm font-semibold">Gagal memuat lirik: ${err.message || 'Koneksi error'}</p>
+          <button onclick="window.App.toggleLyricsSearchBar(true)" class="text-xs text-indigo-400 hover:underline">
+            Cari manual
+          </button>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderLyricsBody(data) {
+  const content = document.getElementById('lyrics-content');
+  if (!content || !data) return;
+
+  if (AppState.lyricsDisplayMode === 'synced' && data.isSynced) {
+    // Mode Karaoke / Synced LRC
+    content.innerHTML = `
+      <div class="text-center py-6 space-y-3">
+        ${data.parsedLines.map((line, idx) => `
+          <div 
+            id="lyric-line-${idx}" 
+            class="lyric-line future text-base md:text-xl leading-relaxed" 
+            data-index="${idx}" 
+            data-time="${line.time}" 
+            onclick="window.App.seekToLyric(${line.time})"
+          >
+            ${line.text || '♪'}
+          </div>
+        `).join('')}
+      </div>
+    `;
+    AppState.activeLyricLineIndex = -1;
+    syncLyricsHighlight(Player.currentTime || 0);
+  } else {
+    // Mode Teks Lengkap (Plain)
+    const stanzas = data.plainLyrics ? data.plainLyrics.split(/\n\s*\n/) : ['Lirik teks tidak tersedia'];
+    content.innerHTML = `
+      <div class="space-y-6 py-6 text-center max-w-xl mx-auto">
+        ${stanzas.map(stanza => `
+          <div class="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+            ${stanza.split('\n').map(l => `<p class="text-sm md:text-base text-slate-200 leading-relaxed">${l.trim() || '&nbsp;'}</p>`).join('')}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+}
+
+function syncLyricsHighlight(currentTime) {
+  if (!Lyrics.currentLyrics || !Lyrics.currentLyrics.isSynced) return;
+  const idx = Lyrics.getActiveLineIndex(currentTime, 0.25);
+
+  if (idx !== AppState.activeLyricLineIndex) {
+    AppState.activeLyricLineIndex = idx;
+    const lines = Lyrics.currentLyrics.parsedLines;
+
+    for (let i = 0; i < lines.length; i++) {
+      const el = document.getElementById(`lyric-line-${i}`);
+      if (!el) continue;
+      if (i < idx) {
+        el.className = 'lyric-line past text-base md:text-xl leading-relaxed';
+      } else if (i === idx) {
+        el.className = 'lyric-line active text-lg md:text-2xl leading-relaxed';
+        // Auto scroll container
+        const container = document.getElementById('lyrics-scroll-container');
+        if (container) {
+          const elTop = el.offsetTop;
+          const targetScroll = elTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+          container.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+        }
+      } else {
+        el.className = 'lyric-line future text-base md:text-xl leading-relaxed';
+      }
+    }
+  }
+}
+
+async function loadAndRenderFullscreenLyrics(track) {
+  const container = document.getElementById('fs-lyrics-content');
+  if (!container) return;
+
+  if (!track && Player.currentTrack) track = Player.currentTrack;
+  if (!track) return;
+
+  container.innerHTML = `
+    <div class="py-12 text-center text-slate-400 flex flex-col items-center gap-2">
+      <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+      <span class="text-xs">Memuat lirik...</span>
+    </div>
+  `;
+
+  try {
+    const data = await Lyrics.fetchLyrics(track);
+    if (!data || (!data.plainLyrics && !data.syncedLyrics)) {
+      container.innerHTML = `
+        <div class="py-12 text-center text-slate-400 text-sm">
+          Lirik belum tersedia untuk lagu ini.
+        </div>
+      `;
+      return;
+    }
+
+    if (data.isSynced) {
+      container.innerHTML = data.parsedLines.map((line, idx) => `
+        <div 
+          id="fs-lyric-line-${idx}" 
+          class="fs-lyric-line inactive" 
+          data-time="${line.time}" 
+          onclick="window.App.seekToLyric(${line.time})"
+        >
+          ${line.text || '♪'}
+        </div>
+      `).join('');
+      syncFullscreenLyricsHighlight(Player.currentTime || 0);
+    } else {
+      container.innerHTML = `
+        <div class="text-slate-300 text-sm space-y-2 whitespace-pre-line py-4">
+          ${data.plainLyrics}
+        </div>
+      `;
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="py-12 text-center text-rose-400 text-xs">Gagal memuat lirik.</div>`;
+  }
+}
+
+function syncFullscreenLyricsHighlight(currentTime) {
+  if (!Lyrics.currentLyrics || !Lyrics.currentLyrics.isSynced) return;
+  const idx = Lyrics.getActiveLineIndex(currentTime, 0.25);
+  const lines = Lyrics.currentLyrics.parsedLines;
+
+  for (let i = 0; i < lines.length; i++) {
+    const el = document.getElementById(`fs-lyric-line-${i}`);
+    if (!el) continue;
+    if (i === idx) {
+      el.className = 'fs-lyric-line active';
+      const wrapper = document.getElementById('fullscreen-lyrics-wrapper');
+      if (wrapper) {
+        const elTop = el.offsetTop;
+        const targetScroll = elTop - (wrapper.clientHeight / 2) + (el.clientHeight / 2);
+        wrapper.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+      }
+    } else {
+      el.className = 'fs-lyric-line inactive';
+    }
   }
 }
 
@@ -2146,6 +2398,129 @@ window.App = {
     } else {
       showToast('Belum ada lagu offline tersimpan', 'info');
     }
+  },
+
+  // Lyrics & Karaoke Methods
+  openLyricsModal(track) {
+    if (!track) {
+      if (Player.currentTrack) track = Player.currentTrack;
+      else {
+        showToast('Pilih dan putar lagu terlebih dahulu untuk melihat lirik', 'info');
+        return;
+      }
+    }
+    const modal = document.getElementById('lyrics-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    AppState.isLyricsModalOpen = true;
+
+    // Prefill query input
+    const sInput = document.getElementById('lyrics-manual-input');
+    if (sInput) sInput.value = `${track.artist} ${Lyrics.cleanQuery(track.title, track.artist)}`.trim();
+
+    loadAndRenderLyrics(track);
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  closeLyricsModal() {
+    const modal = document.getElementById('lyrics-modal');
+    if (modal) modal.classList.add('hidden');
+    AppState.isLyricsModalOpen = false;
+  },
+
+  toggleLyricsSearchBar(forceOpen = null) {
+    const bar = document.getElementById('lyrics-search-bar');
+    if (!bar) return;
+    if (forceOpen === true) bar.classList.remove('hidden');
+    else if (forceOpen === false) bar.classList.add('hidden');
+    else bar.classList.toggle('hidden');
+
+    if (!bar.classList.contains('hidden')) {
+      const input = document.getElementById('lyrics-manual-input');
+      if (input) setTimeout(() => input.focus(), 100);
+    }
+  },
+
+  async searchLyricsManual() {
+    const input = document.getElementById('lyrics-manual-input');
+    const query = input ? input.value.trim() : '';
+    if (!query) {
+      showToast('Ketikkan judul atau artis lagu yang ingin dicari', 'error');
+      return;
+    }
+    showToast(`Mencari lirik: "${query}"...`, 'info');
+    await loadAndRenderLyrics(Player.currentTrack, query);
+  },
+
+  switchLyricsDisplayMode(mode) {
+    AppState.lyricsDisplayMode = mode;
+    const btnSynced = document.getElementById('btn-lyrics-mode-synced');
+    const btnPlain = document.getElementById('btn-lyrics-mode-plain');
+
+    if (mode === 'synced') {
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1.5';
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+    } else {
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1.5';
+    }
+
+    if (Lyrics.currentLyrics) {
+      renderLyricsBody(Lyrics.currentLyrics);
+    }
+  },
+
+  toggleFullscreenLyrics() {
+    AppState.isFullscreenLyricsActive = !AppState.isFullscreenLyricsActive;
+    const record = document.getElementById('fullscreen-record');
+    const lyricsWrapper = document.getElementById('fullscreen-lyrics-wrapper');
+    const btn = document.getElementById('btn-toggle-fs-lyrics');
+    const btnText = document.getElementById('fs-lyrics-btn-text');
+
+    if (AppState.isFullscreenLyricsActive) {
+      if (record) record.classList.add('hidden');
+      if (lyricsWrapper) {
+        lyricsWrapper.classList.remove('hidden');
+        loadAndRenderFullscreenLyrics(Player.currentTrack);
+      }
+      if (btn) btn.classList.add('bg-pink-600', 'text-white');
+      if (btnText) btnText.innerText = 'Vinyl';
+      showToast('Mode Lirik Layar Penuh Aktif 🎤');
+    } else {
+      if (lyricsWrapper) lyricsWrapper.classList.add('hidden');
+      if (record) record.classList.remove('hidden');
+      if (btn) btn.classList.remove('bg-pink-600', 'text-white');
+      if (btnText) btnText.innerText = 'Lirik';
+      showToast('Mode Piringan Hitam Aktif 💿');
+    }
+  },
+
+  seekToLyric(seconds) {
+    if (typeof seconds === 'number' && !isNaN(seconds)) {
+      Player.seek(seconds);
+      showToast(`Melompat ke ${formatTime(seconds)}`);
+    }
+  },
+
+  async copyCurrentLyrics() {
+    if (!Lyrics.currentLyrics) {
+      showToast('Belum ada lirik untuk disalin', 'error');
+      return;
+    }
+    const textToCopy = Lyrics.currentLyrics.plainLyrics || 
+      (Lyrics.currentLyrics.parsedLines ? Lyrics.currentLyrics.parsedLines.map(l => l.text).join('\n') : '');
+    
+    if (!textToCopy) {
+      showToast('Lirik kosong', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(`${Lyrics.currentLyrics.title} - ${Lyrics.currentLyrics.artist}\n\n${textToCopy}`);
+      showToast('Lirik lagu berhasil disalin ke clipboard! 📋', 'success');
+    } catch (e) {
+      showToast('Gagal menyalin lirik', 'error');
+    }
   }
 };
 
@@ -2189,6 +2564,9 @@ function setupKeyboardShortcuts() {
         if (Player.currentTrack) {
           window.App.toggleLike(Player.currentTrack, document.getElementById('player-like-btn'));
         }
+        break;
+      case 'KeyK':
+        window.App.openLyricsModal();
         break;
       case 'KeyQ':
         window.App.toggleQueueDrawer();
