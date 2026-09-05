@@ -1,10 +1,14 @@
 from http.server import BaseHTTPRequestHandler
 import urllib.parse
 import urllib.request
+import mimetypes
 import json
+import os
 import re
 
 SEARCH_CACHE = {}
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 GENRE_QUERIES = {
     'all': 'lagu terpopuler indonesia hits',
@@ -188,7 +192,6 @@ def search_youtube(query, limit=30, page=1):
     except Exception:
         pass
 
-    # Fallback to Invidious public API if YouTube direct scraping returned nothing
     if not results:
         results = search_invidious_fallback(search_term)
 
@@ -216,7 +219,6 @@ class handler(BaseHTTPRequestHandler):
         path = parsed.path
         query_params = urllib.parse.parse_qs(parsed.query)
 
-        # Check rewrite headers from Vercel if available
         req_path = self.headers.get('x-matched-path', '') or self.headers.get('x-forwarded-uri', '') or path
         action = query_params.get('action', [''])[0]
 
@@ -231,7 +233,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'success', 'data': tracks, 'page': page}).encode('utf-8'))
             return
 
-        # 2. API Trending by Genre
+        # 2. API Trending
         if '/trending' in path or '/trending' in req_path or action == 'trending':
             genre = query_params.get('genre', ['all'])[0]
             page = int(query_params.get('page', [1])[0])
@@ -242,7 +244,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'success', 'data': tracks, 'genre': genre, 'page': page}).encode('utf-8'))
             return
 
-        # 3. API Suggestions (Auto-complete)
+        # 3. API Suggestions
         if '/suggest' in path or '/suggest' in req_path or action == 'suggest':
             q = query_params.get('q', [''])[0]
             suggestions = []
@@ -263,7 +265,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # 4. API Network Info / Health check
-        if '/network-info' in path or '/network-info' in req_path or action == 'network-info' or path == '/api' or path == '/api/':
+        if '/network-info' in path or '/network-info' in req_path or action == 'network-info':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.end_headers()
@@ -274,7 +276,33 @@ class handler(BaseHTTPRequestHandler):
             }).encode('utf-8'))
             return
 
-        # Fallback 404 for unknown api
+        # 5. Serve Static HTML/CSS/JS Fallback (if Vercel routes root or static files here)
+        clean_path = path.strip('/')
+        if clean_path in ('', 'index.html'):
+            for p in [os.path.join(ROOT_DIR, 'public', 'index.html'), os.path.join(ROOT_DIR, 'index.html')]:
+                if os.path.isfile(p):
+                    with open(p, 'rb') as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+
+        # Static assets
+        for base in [os.path.join(ROOT_DIR, 'public'), ROOT_DIR]:
+            target = os.path.normpath(os.path.join(base, clean_path))
+            if os.path.isfile(target):
+                mime = mimetypes.guess_type(target)[0] or 'application/octet-stream'
+                with open(target, 'rb') as f:
+                    data = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', mime)
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
+        # Fallback 404
         self.send_response(404)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
