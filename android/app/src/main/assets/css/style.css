@@ -349,3 +349,60 @@ input[type="range"]:hover::-webkit-slider-thumb {
 * {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* ==========================================================================
+   HarmoniX Lyrics & Karaoke Styling
+   ========================================================================== */
+.lyric-line {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  padding: 0.65rem 1.25rem;
+  border-radius: 1rem;
+  user-select: none;
+}
+
+.lyric-line:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff !important;
+}
+
+.lyric-line.active {
+  color: #ffffff !important;
+  font-weight: 800;
+  transform: scale(1.05);
+  text-shadow: 0 0 25px rgba(129, 140, 248, 0.8), 0 0 50px rgba(168, 85, 247, 0.5);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(168, 85, 247, 0.18) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.lyric-line.past {
+  color: rgba(148, 163, 184, 0.45);
+  font-weight: 500;
+}
+
+.lyric-line.future {
+  color: rgba(203, 213, 225, 0.7);
+  font-weight: 600;
+}
+
+/* Fullscreen lyrics container specific */
+.fs-lyric-line {
+  transition: all 0.3s ease;
+  cursor: pointer;
+  padding: 0.45rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.fs-lyric-line.active {
+  color: #ffffff !important;
+  font-weight: 800;
+  font-size: 1.35rem;
+  transform: scale(1.05);
+  text-shadow: 0 0 20px rgba(129, 140, 248, 0.75);
+}
+
+.fs-lyric-line.inactive {
+  color: rgba(148, 163, 184, 0.5);
+  font-size: 1.05rem;
+}
+

@@ -186,6 +186,13 @@ public class MainActivity extends AppCompatActivity {
         } else if (path.equals("/api/suggest")) {
             String q = uri.getQueryParameter("q");
             return executeYouTubeSuggest(q);
+        } else if (path.equals("/api/lyrics")) {
+            String q = uri.getQueryParameter("q");
+            String track = uri.getQueryParameter("track");
+            String artist = uri.getQueryParameter("artist");
+            return executeLyricsProxy(q, track, artist);
+        } else if (path.equals("/api/download")) {
+            return "{\"status\":\"success\",\"url\":\"https://ytmp3.nu/\"}";
         } else if (path.equals("/api/network-info")) {
             return "{\"status\":\"success\",\"local_ip\":\"127.0.0.1\",\"port\":5500,\"local_url\":\"https://appassets.androidplatform.net/assets/index.html\"}";
         }
@@ -282,6 +289,31 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) {}
         return "{\"status\":\"success\",\"data\":[]}";
+    }
+
+    private String executeLyricsProxy(String query, String track, String artist) {
+        try {
+            if (track != null && !track.trim().isEmpty() && artist != null && !artist.trim().isEmpty()) {
+                String getUrl = "https://lrclib.net/api/get?track_name=" + URLEncoder.encode(track.trim(), "UTF-8") + "&artist_name=" + URLEncoder.encode(artist.trim(), "UTF-8");
+                String resp = fetchHttp(getUrl);
+                if (resp != null && !resp.trim().isEmpty() && !resp.equals("null")) {
+                    return "{\"status\":\"success\",\"data\":" + resp + "}";
+                }
+            }
+            if (query != null && !query.trim().isEmpty()) {
+                String searchUrl = "https://lrclib.net/api/search?q=" + URLEncoder.encode(query.trim(), "UTF-8");
+                String resp = fetchHttp(searchUrl);
+                if (resp != null && !resp.trim().isEmpty()) {
+                    JSONArray arr = new JSONArray(resp);
+                    if (arr.length() > 0) {
+                        return "{\"status\":\"success\",\"data\":" + arr.getJSONObject(0).toString() + "}";
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "{\"status\":\"error\",\"message\":\"Lyrics not found\"}";
     }
 
     private static String fetchHttp(String urlStr) {

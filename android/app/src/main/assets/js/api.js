@@ -186,11 +186,14 @@ export const STARTER_HITS = [
 ];
 
 export const MusicAPI = {
-  // Cari lagu dari YouTube Gateway (Mendukung link langsung & kata kunci)
+  // Cari lagu dari YouTube Gateway & Fallback Multi-source (Mendukung link langsung & kata kunci)
   async searchTracks(query, limit = 30, page = 1) {
     if (!query || !query.trim()) return [];
+    const trimmedQuery = query.trim();
+
+    // 1. Coba cari via Serverless Backend (YouTube Innertube API)
     try {
-      const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query.trim())}&page=${page}`);
+      const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(trimmedQuery)}&page=${page}`);
       if (res.ok) {
         const json = await res.json();
         if (json.data && Array.isArray(json.data) && json.data.length > 0) {
@@ -198,18 +201,50 @@ export const MusicAPI = {
         }
       }
     } catch (err) {
-      console.warn('Pencarian API gagal:', err);
+      console.warn('Pencarian backend API gagal/offline, beralih ke fallback langsung:', err);
     }
 
-    // Fallback pencarian lokal jika offline
-    const q = query.toLowerCase();
+    // 2. Direct Client-side iTunes Search Fallback (Free, fast, CORS open, audio preview resmi)
+    try {
+      const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(trimmedQuery)}&entity=song&limit=${limit}`);
+      if (itunesRes.ok) {
+        const itunesData = await itunesRes.json();
+        if (itunesData.results && Array.isArray(itunesData.results) && itunesData.results.length > 0) {
+          return itunesData.results.map(item => {
+            const durMs = item.trackTimeMillis || 210000;
+            const durSec = Math.floor(durMs / 1000);
+            const m = Math.floor(durSec / 60);
+            const s = durSec % 60;
+            return {
+              id: `itunes-${item.trackId}`,
+              videoId: null,
+              title: item.trackName || 'Lagu',
+              artist: item.artistName || 'Artis',
+              duration: durSec,
+              durationStr: `${m}:${s < 10 ? '0' : ''}${s}`,
+              artwork: (item.artworkUrl100 || '').replace('100x100bb', '500x500bb') || 'icons/icon-192.png',
+              genre: item.primaryGenreName || 'Music',
+              streamUrl: item.previewUrl || '',
+              source: 'itunes',
+              isRadio: false,
+              isLocal: false
+            };
+          });
+        }
+      }
+    } catch (itunesErr) {
+      console.warn('Direct iTunes search fallback failed:', itunesErr);
+    }
+
+    // 3. Fallback pencarian lokal starter hits HANYA jika query benar-benar cocok
+    const q = trimmedQuery.toLowerCase();
     const filtered = STARTER_HITS.filter(t => 
       t.title.toLowerCase().includes(q) || 
       t.artist.toLowerCase().includes(q) || 
       (t.genre && t.genre.toLowerCase().includes(q))
     );
 
-    return filtered.length > 0 ? filtered : STARTER_HITS;
+    return filtered;
   },
 
   // Ambil lagu trending berdasarkan genre dengan dukungan paginasi

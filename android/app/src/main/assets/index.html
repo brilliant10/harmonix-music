@@ -53,7 +53,7 @@
   <script src="https://www.youtube.com/iframe_api"></script>
 
   <!-- Custom Styles, Aurora & Glassmorphism -->
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=7.0" />
 </head>
 
 <body class="bg-[#050811] text-slate-100 h-screen w-screen overflow-hidden antialiased selection:bg-indigo-500 selection:text-white relative">
@@ -115,6 +115,12 @@
         <!-- Navigation: Koleksi Musik -->
         <nav class="space-y-1 pt-3 border-t border-white/5">
           <div class="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Koleksi Saya</div>
+
+          <button data-nav="offline" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all group">
+            <i data-lucide="cloud-off" class="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform"></i>
+            <span class="flex-1 text-left">Lagu Offline</span>
+            <span id="offline-badge-count" class="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold hidden">0</span>
+          </button>
 
           <button data-nav="local" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent transition-all">
             <i data-lucide="folder-music" class="w-4 h-4 text-cyan-400"></i>
@@ -183,19 +189,30 @@
             <i data-lucide="menu" class="w-5 h-5"></i>
           </button>
 
-          <!-- Search Bar with Autocomplete -->
+          <!-- Search Bar with Autocomplete & Mobile Form -->
           <div class="relative flex-1">
-            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-            <input 
-              id="global-search-input" 
-              type="text" 
-              autocomplete="off"
-              placeholder="Cari jutaan lagu YouTube, artis, atau tempel link..." 
-              class="w-full pl-11 pr-12 py-2.5 rounded-2xl bg-slate-900/85 border border-white/10 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
-            />
-            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 hidden sm:inline-block">
-              /
-            </div>
+            <form id="global-search-form" action="javascript:void(0);" class="relative flex items-center w-full">
+              <button type="submit" aria-label="Cari Lagu" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-400 p-1 rounded-lg transition-colors z-10">
+                <i data-lucide="search" class="w-4 h-4"></i>
+              </button>
+              <input 
+                id="global-search-input" 
+                type="search" 
+                enterkeyhint="search"
+                autocomplete="off"
+                placeholder="Cari jutaan lagu YouTube, artis, atau tempel link..." 
+                class="w-full pl-11 pr-20 py-2.5 rounded-2xl bg-slate-900/85 border border-white/10 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
+              />
+              <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10">
+                <button type="button" id="global-search-clear" title="Hapus teks" class="hidden p-1 rounded-full text-slate-400 hover:text-white bg-slate-800/80 transition-colors">
+                  <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                </button>
+                <button type="submit" class="px-2.5 py-1 rounded-xl bg-indigo-600/80 hover:bg-indigo-500 text-[11px] font-bold text-white transition-colors hidden sm:inline-flex items-center gap-1">
+                  <span>Cari</span>
+                </button>
+                <span class="text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 hidden md:inline-block">/</span>
+              </div>
+            </form>
             
             <!-- Live Autocomplete Dropdown -->
             <div id="search-suggestions-box" class="absolute left-0 right-0 top-full mt-2 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden z-50 space-y-1 max-h-64 overflow-y-auto">
@@ -206,6 +223,12 @@
 
         <!-- Action Tools -->
         <div class="flex items-center gap-2">
+          <!-- Network Status Indicator -->
+          <div id="network-status-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="network-status-text">Online</span>
+          </div>
+
           <!-- PWA Download Header Button -->
           <button id="btn-install-pwa" onclick="window.App.installPWA()" title="Download & Pasang HarmoniX Desktop" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg glow-primary transition-all">
             <i data-lucide="download" class="w-4 h-4"></i>
@@ -216,6 +239,13 @@
           <button id="btn-open-mobile" onclick="window.App.openMobileModal()" title="Buka / Pasang di iPhone & Android" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl glass-panel hover:border-emerald-500/50 text-slate-300 hover:text-emerald-400 text-xs font-semibold transition-all">
             <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i>
             <span class="hidden md:inline">iPhone & Android</span>
+          </button>
+
+          <!-- Safari Background Audio Status Button -->
+          <button id="btn-safari-bg" onclick="window.App.openSafariBackgroundModal()" title="Fitur Background Audio Safari iOS (Aktif)" class="hidden xl:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-xs font-semibold transition-all">
+            <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+            <i data-lucide="apple" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Background Safari</span>
           </button>
 
           <!-- Quick YouTube Link Button -->
@@ -262,10 +292,14 @@
 
     <!-- Right Drawer: Up Next Queue & Lyrics -->
     <div id="queue-drawer" class="fixed inset-y-0 right-0 z-40 w-80 md:w-96 glass-modal border-l border-white/10 flex flex-col justify-between p-5 transform translate-x-full transition-transform duration-300 shadow-2xl">
-      <div class="flex items-center justify-between pb-4 border-b border-white/5">
-        <div class="flex items-center gap-2">
-          <i data-lucide="list-music" class="w-5 h-5 text-indigo-400"></i>
-          <h3 class="text-base font-bold text-white">Antrean Lagu (Up Next)</h3>
+      <div class="flex items-center justify-between pb-3 border-b border-white/5">
+        <div class="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-white/10 text-xs">
+          <button id="drawer-tab-queue" onclick="window.App.switchDrawerTab('queue')" class="px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all">
+            Antrean (<span id="drawer-queue-tab-count">0</span>)
+          </button>
+          <button id="drawer-tab-similar" onclick="window.App.switchDrawerTab('similar')" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i> Lagu Mirip
+          </button>
         </div>
         <button onclick="window.App.toggleQueueDrawer()" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
           <i data-lucide="x" class="w-5 h-5"></i>
@@ -273,12 +307,17 @@
       </div>
 
       <!-- Current Track Info in Drawer -->
-      <div id="drawer-current-track" class="py-4 border-b border-white/5">
+      <div id="drawer-current-track" class="py-3 border-b border-white/5">
         <!-- Injected via JS -->
       </div>
 
       <!-- Queue List -->
       <div class="flex-1 overflow-y-auto py-3 space-y-2" id="drawer-queue-list">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Similar / Recommended Tracks List in Drawer -->
+      <div class="flex-1 overflow-y-auto py-3 space-y-2 hidden" id="drawer-similar-list">
         <!-- Injected via JS -->
       </div>
 
@@ -310,6 +349,12 @@
       </div>
       <button id="player-like-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.toggleLike(window.Player.currentTrack, this)" class="p-1.5 text-slate-400 hover:text-rose-500 transition-colors flex-shrink-0">
         <i data-lucide="heart" class="w-5 h-5"></i>
+      </button>
+      <button id="player-download-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.openDownloadModal(window.Player.currentTrack)" title="Download / Simpan Offline" class="p-1.5 text-slate-400 hover:text-amber-400 transition-colors flex-shrink-0">
+        <i data-lucide="download" class="w-5 h-5"></i>
+      </button>
+      <button id="player-lyrics-btn" onclick="if(window.Player && window.Player.currentTrack) window.App.openLyricsModal(window.Player.currentTrack); else window.App.openLyricsModal();" title="Lirik Lagu (Karaoke)" class="p-1.5 text-slate-400 hover:text-indigo-400 transition-colors flex-shrink-0">
+        <i data-lucide="mic-2" class="w-5 h-5"></i>
       </button>
     </div>
 
@@ -686,6 +731,9 @@
         <span class="text-sm font-bold tracking-wider text-slate-300 uppercase">Now Playing</span>
       </div>
       <div class="flex items-center gap-3">
+        <button id="btn-toggle-fs-lyrics" onclick="window.App.toggleFullscreenLyrics()" class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors">
+          <i data-lucide="mic-2" class="w-4 h-4 text-pink-400"></i> <span id="fs-lyrics-btn-text">Lirik</span>
+        </button>
         <button id="btn-toggle-video" onclick="window.App.toggleVideoMode()" class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors">
           <i data-lucide="video" class="w-4 h-4 text-indigo-400"></i> Mode Video Klip
         </button>
@@ -695,7 +743,7 @@
       </div>
     </div>
 
-    <div class="relative z-10 flex flex-col items-center justify-center my-auto space-y-6">
+    <div class="relative z-10 flex flex-col items-center justify-center my-auto space-y-6 w-full max-w-2xl mx-auto">
       
       <!-- Video Frame Container -->
       <div id="yt-player-wrapper" class="invisible-player">
@@ -711,7 +759,14 @@
         </div>
       </div>
 
-      <div class="text-center space-y-1 max-w-lg">
+      <!-- Fullscreen Synced Lyrics View (hidden by default) -->
+      <div id="fullscreen-lyrics-wrapper" class="hidden w-full h-72 md:h-80 overflow-y-auto scrollbar-none text-center px-4 py-4 space-y-4 select-text">
+        <div id="fs-lyrics-content" class="space-y-4">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+
+      <div id="fullscreen-track-meta" class="text-center space-y-1 max-w-lg">
         <h2 id="fullscreen-title" class="text-2xl md:text-3xl font-extrabold text-white truncate">Pilih Lagu</h2>
         <p id="fullscreen-artist" class="text-base text-slate-400 truncate">HarmoniX Music</p>
       </div>
@@ -774,7 +829,188 @@
     </div>
   </div>
 
-  <!-- 8. Floating Context Menu -->
+  <!-- 8. Modal Download / Simpan Offline Lagu -->
+  <div id="track-download-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="glass-modal rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl border border-white/10 animate-fadeIn">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+            <i data-lucide="download" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-bold text-white">Download & Mode Offline</h3>
+        </div>
+        <button onclick="document.getElementById('track-download-modal').classList.add('hidden')" class="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Track Preview -->
+      <div class="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10">
+        <img id="dl-modal-art" src="icons/icon-192.png" alt="Art" class="w-14 h-14 rounded-xl object-cover" />
+        <div class="min-w-0 flex-1">
+          <h4 id="dl-modal-title" class="text-sm font-bold text-white truncate">Judul Lagu</h4>
+          <p id="dl-modal-artist" class="text-xs text-slate-400 truncate">Nama Artis</p>
+          <span id="dl-modal-status" class="inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">Siap disimpan</span>
+        </div>
+      </div>
+
+      <!-- Download Options -->
+      <div class="space-y-3">
+        <!-- Opsi 1: Simpan ke Perpustakaan Offline PWA (IndexedDB) -->
+        <div class="p-4 rounded-2xl glass-panel border border-amber-500/30 hover:border-amber-500 transition-all cursor-pointer group" onclick="window.App.confirmSaveOffline()">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <i data-lucide="bookmark-plus" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h5 class="text-xs font-bold text-white">Simpan ke Perpustakaan PWA ⚡</h5>
+                <p class="text-[10px] text-slate-400">Tersimpan di daftar HarmoniX Anda & siap putar full kapan saja.</p>
+              </div>
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all"></i>
+          </div>
+          <!-- Progress bar -->
+          <div id="dl-progress-bar-container" class="mt-3 hidden">
+            <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div id="dl-progress-bar" class="h-full bg-gradient-to-r from-amber-500 to-emerald-400 w-0 transition-all duration-300"></div>
+            </div>
+            <p id="dl-progress-text" class="text-[10px] text-slate-400 mt-1 text-right font-mono">Menyimpan...</p>
+          </div>
+        </div>
+
+        <!-- Opsi 2: Download File MP3 Asli ke HP / Komputer -->
+        <div class="p-4 rounded-2xl glass-panel border border-emerald-500/30 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center">
+                <i data-lucide="file-audio" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h5 class="text-xs font-bold text-white">Unduh File MP3 Asli ke HP / Laptop 🎵</h5>
+                <p class="text-[10px] text-emerald-400/90 font-medium">Kualitas 320kbps • Bisa diputar di Files iPhone & Android</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Server Downloader Buttons -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            <button onclick="window.App.confirmDownloadFile('ytmp3')" class="flex items-center justify-between px-3 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/60 border border-indigo-500/30 text-indigo-200 hover:text-white text-xs font-semibold transition-all">
+              <span class="flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i> Server 1 (YTMP3)
+              </span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5 opacity-60"></i>
+            </button>
+            <button onclick="window.App.confirmDownloadFile('snapsave')" class="flex items-center justify-between px-3 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 text-emerald-200 hover:text-white text-xs font-semibold transition-all">
+              <span class="flex items-center gap-1.5">
+                <i data-lucide="smartphone" class="w-3.5 h-3.5 text-emerald-400"></i> Server 2 (SnapSave)
+              </span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5 opacity-60"></i>
+            </button>
+          </div>
+
+          <!-- Salin Link Saja & Tips -->
+          <div class="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+            <button onclick="window.App.copyPendingTrackLink()" class="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 font-medium py-1 transition-colors">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> Salin Link YouTube Lagu
+            </button>
+            <span class="text-[10px] text-slate-500 font-mono">100% Bebas Kuota</span>
+          </div>
+
+          <!-- Panduan iPhone / Android -->
+          <div class="p-2.5 rounded-xl bg-black/30 border border-white/5 text-[10px] text-slate-400 leading-relaxed">
+            <p><strong class="text-slate-200">📱 Panduan iPhone (iOS):</strong> Klik salah satu Server di atas. Link lagu otomatis disalin ke clipboard Anda. Di tab downloader, tekan <strong>Tempel / Paste</strong> lalu unduh berkas MP3. File akan masuk ke aplikasi <strong>Files (File) ➔ Unduhan</strong> di iPhone Anda!</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 8.5. Dedicated Lyrics Sheet / Modal (Karaoke & Plain Text) -->
+  <div id="lyrics-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex flex-col justify-between hidden animate-fadeIn select-none">
+    <!-- Dynamic Blurred Background from Album Art -->
+    <div id="lyrics-bg-art" class="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-25 scale-125 pointer-events-none transition-all duration-700"></div>
+    <div class="absolute inset-0 bg-gradient-to-b from-black/80 via-black/60 to-[#050811] pointer-events-none"></div>
+
+    <!-- Top Bar Header -->
+    <div class="relative z-10 p-4 md:px-8 md:py-5 border-b border-white/10 flex items-center justify-between">
+      <div class="flex items-center gap-3.5 min-w-0">
+        <img id="lyrics-modal-art" src="icons/icon-192.png" alt="Art" class="w-11 h-11 md:w-12 md:h-12 rounded-2xl object-cover shadow-lg border border-white/10 flex-shrink-0" />
+        <div class="min-w-0">
+          <h3 id="lyrics-modal-title" class="text-sm md:text-base font-bold text-white truncate">Judul Lagu</h3>
+          <p id="lyrics-modal-artist" class="text-xs text-slate-400 truncate">Nama Artis</p>
+        </div>
+      </div>
+
+      <!-- Controls & Actions -->
+      <div class="flex items-center gap-2">
+        <!-- Toggle Mode: Karaoke (Synced) vs Teks Lengkap (Plain) -->
+        <div class="flex items-center bg-white/10 p-1 rounded-xl border border-white/10 text-xs">
+          <button id="btn-lyrics-mode-synced" onclick="window.App.switchLyricsDisplayMode('synced')" class="px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1.5">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span class="hidden sm:inline">Karaoke</span>
+          </button>
+          <button id="btn-lyrics-mode-plain" onclick="window.App.switchLyricsDisplayMode('plain')" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all">
+            Teks
+          </button>
+        </div>
+
+        <!-- Manual Search Button -->
+        <button onclick="window.App.toggleLyricsSearchBar()" title="Cari lirik manual / ganti kata kunci" class="p-2 rounded-xl glass-panel text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Copy Lyrics Button -->
+        <button onclick="window.App.copyCurrentLyrics()" title="Salin lirik ke clipboard" class="p-2 rounded-xl glass-panel text-slate-300 hover:text-white hover:bg-white/10 transition-colors">
+          <i data-lucide="copy" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Close Modal -->
+        <button onclick="window.App.closeLyricsModal()" class="p-2 rounded-xl glass-panel text-slate-400 hover:text-white hover:bg-rose-500/20 hover:text-rose-400 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Collapsible Manual Search Bar -->
+    <div id="lyrics-search-bar" class="relative z-10 px-4 md:px-8 py-2.5 bg-black/40 border-b border-white/5 hidden animate-fadeIn">
+      <form onsubmit="event.preventDefault(); window.App.searchLyricsManual();" class="flex items-center gap-2 max-w-xl mx-auto">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input id="lyrics-manual-input" type="text" placeholder="Ketik nama artis & judul lagu yang tepat..." class="w-full pl-9 pr-3 py-2 text-xs bg-slate-900/80 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all" />
+        </div>
+        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow">
+          Cari
+        </button>
+      </form>
+    </div>
+
+    <!-- Center: Lyrics Content Container -->
+    <div id="lyrics-scroll-container" class="relative z-10 flex-1 overflow-y-auto px-4 md:px-8 py-10 scroll-smooth select-text">
+      <div id="lyrics-content" class="max-w-2xl mx-auto space-y-4">
+        <!-- Dynamic lyrics content injected via JS -->
+      </div>
+    </div>
+
+    <!-- Bottom Mini Playback Controls in Lyrics Modal -->
+    <div class="relative z-10 p-4 md:px-8 border-t border-white/10 bg-black/60 backdrop-blur-md flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <button onclick="window.Player.togglePlay()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95">
+          <i data-lucide="play" class="w-5 h-5 fill-current ml-0.5 player-play-icon"></i>
+        </button>
+        <span class="text-xs text-slate-400 font-mono" id="lyrics-playback-timer">0:00 / 0:00</span>
+      </div>
+
+      <div class="text-[11px] text-slate-400 flex items-center gap-1.5">
+        <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-indigo-400"></i>
+        <span class="hidden sm:inline">Klik baris lirik untuk melompat ke posisi lagu</span>
+        <span class="sm:hidden">Sentuh lirik untuk melompat</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Floating Context Menu -->
   <div id="track-action-menu" class="fixed z-50 w-56 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden animate-fadeIn">
     <div class="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
       Tambahkan ke Playlist:
@@ -789,7 +1025,53 @@
     </div>
   </div>
 
+  <!-- 10. Modal: Safari Background Audio Guide -->
+  <div id="safari-bg-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 hidden animate-fadeIn">
+    <div class="relative w-full max-w-md glass-modal rounded-3xl p-6 md:p-8 space-y-6 border border-white/10 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-600/30 flex items-center justify-center text-indigo-400 border border-indigo-500/30">
+            <i data-lucide="headphones" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-white">Background Audio Safari</h3>
+            <span class="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Sistem Aktif Otomatis 🍎
+            </span>
+          </div>
+        </div>
+        <button onclick="document.getElementById('safari-bg-modal').classList.add('hidden')" class="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs md:text-sm text-slate-300 leading-relaxed">
+        <p>HarmoniX kini dilengkapi <strong class="text-white">MediaSession & Audio Keepalive Bridge</strong> yang dirancang khusus untuk iOS Safari di iPhone & iPad:</p>
+        
+        <div class="space-y-2.5">
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="lock" class="w-4 h-4 text-indigo-400 shrink-0 mt-0.5"></i>
+            <span><strong>Layar Terkunci (Lock Screen):</strong> Musik tetap berputar saat HP dikunci dengan tampilan cover lagu & judul lagu.</span>
+          </div>
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="layout" class="w-4 h-4 text-purple-400 shrink-0 mt-0.5"></i>
+            <span><strong>Pindah Aplikasi / Dynamic Island:</strong> Buka WhatsApp, Instagram, atau game lain tanpa memutus alunan lagu.</span>
+          </div>
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="sliders" class="w-4 h-4 text-cyan-400 shrink-0 mt-0.5"></i>
+            <span><strong>Control Center & AirPods:</strong> Kontrol Play, Pause, Next, Prev, dan seekbar langsung dari headphone atau Control Center iOS.</span>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="document.getElementById('safari-bg-modal').classList.add('hidden')" class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg glow-primary transition-all">
+        Mengerti, Lanjutkan Mendengarkan
+      </button>
+    </div>
+  </div>
+
   <!-- Main JavaScript App Entry -->
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=7.0"></script>
 </body>
 </html>

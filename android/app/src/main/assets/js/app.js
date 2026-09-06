@@ -6,6 +6,9 @@ import { MusicAPI, RADIO_STATIONS, STARTER_HITS } from './api.js';
 import { Player, EQ_PRESETS } from './audio.js';
 import { Visualizer } from './visualizer.js';
 import { Storage } from './storage.js';
+import { OfflineStorage } from './offline.js';
+import { Recommendations } from './recommendations.js';
+import { Lyrics } from './lyrics.js';
 
 // Application State
 const AppState = {
@@ -23,7 +26,15 @@ const AppState = {
   isQueueDrawerOpen: false,
   sleepTimerTimeout: null,
   sleepTimerInterval: null,
-  sleepTimerSecondsLeft: 0
+  sleepTimerSecondsLeft: 0,
+  offlineTracks: [],
+  pendingDownloadTrack: null,
+  currentDrawerTab: 'queue',
+  isLyricsModalOpen: false,
+  isFullscreenLyricsActive: false,
+  lyricsDisplayMode: 'synced',
+  activeLyricLineIndex: -1,
+  lastAutoScroll: 0
 };
 
 // PWA Installation State & Events
@@ -39,6 +50,34 @@ window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
   showToast('HarmoniX Music Player berhasil dipasang di Desktop!', 'success');
 });
+
+// Centralized Track Registry for Safe Event Handlers (Fixes all quotation & syntax errors)
+window.HarmoniXTracks = new Map();
+
+function registerTrack(track) {
+  if (!track || !track.id) return track;
+  window.HarmoniXTracks.set(String(track.id), track);
+  return track;
+}
+
+function resolveTrack(trackOrId) {
+  if (!trackOrId) return null;
+  if (typeof trackOrId === 'object') {
+    if (trackOrId.id) window.HarmoniXTracks.set(String(trackOrId.id), trackOrId);
+    return trackOrId;
+  }
+  return window.HarmoniXTracks.get(String(trackOrId)) || null;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // Helper: Format seconds to mm:ss
 function formatTime(seconds) {
@@ -124,6 +163,9 @@ function switchView(viewName, meta = null) {
     case 'history':
       renderHistoryView();
       break;
+    case 'offline':
+      renderOfflineView();
+      break;
     case 'search':
       renderSearchView(meta || '');
       break;
@@ -202,6 +244,25 @@ async function renderDiscoverView() {
         </div>
       </div>
 
+      <!-- Rekomendasi Pintar Untukmu (Based on History & Taste) -->
+      <div class="space-y-4" id="recommendations-container">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+              <i data-lucide="sparkles" class="w-5 h-5 text-amber-400"></i> Rekomendasi Untukmu
+            </h2>
+            <p id="rec-reason-text" class="text-xs text-slate-400 mt-0.5">Saran lagu cerdas berdasarkan apa yang sering kamu dengar</p>
+          </div>
+          <button onclick="window.App.refreshPersonalizedRecommendations()" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-panel hover:bg-white/5 transition-all">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Segarkan
+          </button>
+        </div>
+
+        <div id="recommendations-tracks-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          ${renderTrackSkeletons(5)}
+        </div>
+      </div>
+
       <!-- Main Trending Grid -->
       <div class="space-y-4">
         <div class="flex items-center justify-between">
@@ -246,8 +307,28 @@ async function renderDiscoverView() {
     if (heroBtn && tracks.length > 0) {
       heroBtn.onclick = () => Player.playTrack(tracks[0], tracks);
     }
+
+    // Muat rekomendasi personal
+    loadRecommendationsSection();
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function loadRecommendationsSection() {
+  try {
+    const recData = await Recommendations.getPersonalizedRecommendations(10);
+    const reasonEl = document.getElementById('rec-reason-text');
+    if (reasonEl && recData.reason) {
+      reasonEl.textContent = recData.reason;
+    }
+    const recGrid = document.getElementById('recommendations-tracks-grid');
+    if (recGrid && recData.tracks) {
+      recGrid.innerHTML = recData.tracks.map((t, idx) => renderTrackCard(t, idx, recData.tracks)).join('');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  } catch (e) {
+    console.warn('Gagal memuat rekomendasi:', e);
   }
 }
 
@@ -420,7 +501,7 @@ function renderRadioView() {
               <div class="flex items-center gap-2 text-xs text-slate-400">
                 <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Siaran Aktif
               </div>
-              <button onclick='window.App.playStation(${JSON.stringify(station).replace(/'/g, "\\'")})' class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all">
+              <button onclick="window.App.playStation('${station.id}')" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all">
                 <i data-lucide="play" class="w-4 h-4 fill-current"></i> Putar Stasiun
               </button>
             </div>
@@ -733,6 +814,214 @@ function renderHistoryView() {
   if (window.lucide) window.lucide.createIcons();
 }
 
+// 9. Offline Music View (PWA & Local IndexedDB)
+async function renderOfflineView() {
+  const container = document.getElementById('view-container');
+  container.innerHTML = `
+    <div class="space-y-6 animate-fadeIn pb-12">
+      <!-- Header -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 md:p-8 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/20 shadow-xl backdrop-blur-xl">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold">
+            <i data-lucide="cloud-off" class="w-3.5 h-3.5"></i> Mode 100% Offline Tanpa Kuota
+          </div>
+          <h1 class="text-2xl md:text-3xl font-extrabold text-white flex items-center gap-2.5">
+            <i data-lucide="hard-drive-download" class="w-7 h-7 text-amber-400"></i> Perpustakaan Lagu Offline
+          </h1>
+          <p class="text-xs md:text-sm text-slate-300 max-w-2xl leading-relaxed">
+            Lagu yang tersimpan di sini berada di penyimpanan lokal browser/PWA Anda. Tetap bisa diputar lancar saat <span class="text-amber-300 font-semibold">Mode Pesawat</span> atau ketika tidak ada sinyal internet sama sekali.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md glow-primary transition-all flex items-center gap-2 cursor-pointer">
+            <i data-lucide="upload" class="w-4 h-4"></i> Tambah MP3 Manual
+            <input type="file" id="offline-file-input" accept="audio/*" multiple class="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Storage & Controls Bar -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl glass-panel text-xs">
+        <div class="flex items-center gap-3 text-slate-300">
+          <span id="offline-storage-info" class="flex items-center gap-1.5 font-medium">
+            <i data-lucide="database" class="w-4 h-4 text-amber-400"></i> Memuat data penyimpanan...
+          </span>
+        </div>
+        <button onclick="window.App.playAllOfflineTracks()" id="btn-play-all-offline" class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition-all flex items-center justify-center gap-2 shadow-md">
+          <i data-lucide="play" class="w-4 h-4 fill-current"></i> Putar Semua Lagu Offline
+        </button>
+      </div>
+
+      <!-- Offline Tracks Container -->
+      <div id="offline-tracks-container">
+        <div class="flex items-center justify-center py-20 text-slate-400 text-xs">
+          <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-amber-400"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+
+  const fileInput = document.getElementById('offline-file-input');
+  if (fileInput) {
+    fileInput.onchange = async (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        await handleOfflineFilesUpload(e.target.files);
+      }
+    };
+  }
+
+  await loadAndRenderOfflineTracks();
+}
+
+async function handleOfflineFilesUpload(files) {
+  const audioFiles = Array.from(files).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac)$/i.test(f.name));
+  if (audioFiles.length === 0) {
+    showToast('Pilih berkas audio yang valid (.mp3, .wav, .m4a)', 'error');
+    return;
+  }
+
+  showToast(`Menyimpan ${audioFiles.length} lagu ke memori offline...`, 'info');
+
+  for (const file of audioFiles) {
+    let nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+    let artist = 'File Lokal Offline';
+    let title = nameWithoutExt;
+
+    if (nameWithoutExt.includes(' - ')) {
+      const parts = nameWithoutExt.split(' - ');
+      artist = parts[0].trim();
+      title = parts.slice(1).join(' - ').trim();
+    }
+
+    const track = {
+      id: 'offline-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      title: title,
+      artist: artist,
+      genre: 'Offline Local',
+      duration: 210,
+      durationStr: 'Audio',
+      artwork: 'icons/icon-192.png',
+      isOffline: true,
+      source: 'offline'
+    };
+
+    await OfflineStorage.saveTrack(track, file);
+  }
+
+  showToast(`Berhasil menyimpan ${audioFiles.length} lagu offline!`, 'success');
+  await loadAndRenderOfflineTracks();
+  await updateOfflineBadgeCount();
+}
+
+async function loadAndRenderOfflineTracks() {
+  const container = document.getElementById('offline-tracks-container');
+  const storageInfo = document.getElementById('offline-storage-info');
+  const tracks = await OfflineStorage.getAllTracks();
+  AppState.offlineTracks = tracks;
+
+  const usage = await OfflineStorage.getStorageUsage();
+  if (storageInfo) {
+    storageInfo.innerHTML = `
+      <i data-lucide="database" class="w-4 h-4 text-amber-400"></i>
+      <span>Tersimpan: <b class="text-white">${usage.count} Lagu</b> (${usage.mb})</span>
+    `;
+  }
+
+  if (!container) return;
+
+  if (tracks.length === 0) {
+    container.innerHTML = `
+      <div class="py-20 text-center glass-panel rounded-3xl p-8 space-y-4 border border-dashed border-white/15">
+        <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+          <i data-lucide="cloud-off" class="w-8 h-8"></i>
+        </div>
+        <div class="space-y-1">
+          <h3 class="text-lg font-bold text-white">Belum Ada Lagu Offline</h3>
+          <p class="text-xs text-slate-400 max-w-md mx-auto">
+            Klik tombol download (<i data-lucide="download" class="w-3.5 h-3.5 inline text-amber-400"></i>) pada lagu manapun di Discover atau unggah file MP3 untuk diputar tanpa kuota internet.
+          </p>
+        </div>
+        <button onclick="window.App.switchView('discover')" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md transition-all">
+          Cari Lagu untuk Di-download
+        </button>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="space-y-2">
+      ${tracks.map((t, idx) => renderOfflineTrackRow(t, idx, tracks)).join('')}
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function renderOfflineTrackRow(track, index, trackList) {
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
+
+  return `
+    <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-amber-500/50 bg-amber-950/20 active-track-glow' : ''}">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <div class="w-7 text-center text-xs text-slate-400 font-medium">
+          ${isCurrentlyPlaying && Player.isPlaying ? `
+            <div class="flex items-center justify-center">
+              <span class="playing-bar bg-amber-400"></span>
+              <span class="playing-bar bg-amber-400"></span>
+              <span class="playing-bar bg-amber-400"></span>
+            </div>
+          ` : `${index + 1}`}
+        </div>
+
+        <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
+          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover" loading="lazy" />
+          <button onclick="window.App.playOfflineTrack('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+            <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
+          </button>
+        </div>
+
+        <div class="min-w-0 flex-1">
+          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-amber-400 font-bold' : 'text-slate-100'}">${escapeHtml(track.title)}</h4>
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">Offline</span>
+            <p class="text-xs text-slate-400 truncate">${escapeHtml(track.artist)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 ml-4">
+        <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
+        
+        <button onclick="window.App.deleteOfflineTrack('${trackId}')" title="Hapus dari penyimpanan offline" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function updateOfflineBadgeCount() {
+  try {
+    const tracks = await OfflineStorage.getAllTracks();
+    const badge = document.getElementById('offline-badge-count');
+    if (badge) {
+      if (tracks.length > 0) {
+        badge.textContent = tracks.length;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+  } catch (e) {}
+}
+
 // --- Component Templates ---
 
 function renderTrackSkeletons(count = 8) {
@@ -746,14 +1035,16 @@ function renderTrackSkeletons(count = 8) {
 }
 
 function renderTrackCard(track, index, trackList) {
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
   const isLiked = Storage.isLiked(track.id);
-  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
-  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
     <div class="glass-card rounded-2xl p-3 flex flex-col justify-between group relative overflow-hidden ${isCurrentlyPlaying ? 'active-track-glow' : ''}">
       <div class="relative w-full aspect-square rounded-xl overflow-hidden mb-3 bg-slate-800">
-        <img src="${track.artwork}" alt="${track.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+        <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         
         <!-- Live Soundwave Badge if Playing -->
         ${isCurrentlyPlaying && Player.isPlaying ? `
@@ -766,24 +1057,28 @@ function renderTrackCard(track, index, trackList) {
 
         <!-- Hover Overlay -->
         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px]">
-          <button onclick='window.App.playFromCard(${trackJson}, ${index})' class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
+          <button onclick="window.App.playFromCard('${trackId}', ${index})" class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-5 h-5 fill-current ml-0.5"></i>
           </button>
         </div>
 
-        <button onclick='window.App.toggleLike(${trackJson}, this)' class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Simpan Offline" class="absolute top-2 left-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-amber-400 transition-colors">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
+
+        <button onclick="window.App.toggleLike('${trackId}', this)" class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
       </div>
 
       <div class="min-w-0">
-        <h4 class="text-sm font-bold text-white truncate group-hover:text-indigo-400 transition-colors" title="${track.title}">${track.title}</h4>
-        <p class="text-xs text-slate-400 truncate mt-0.5" title="${track.artist}">${track.artist}</p>
+        <h4 class="text-sm font-bold text-white truncate group-hover:text-indigo-400 transition-colors" title="${escapeHtml(track.title)}">${escapeHtml(track.title)}</h4>
+        <p class="text-xs text-slate-400 truncate mt-0.5" title="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</p>
       </div>
 
       <div class="flex items-center justify-between mt-3 pt-2 border-t border-white/5 text-[11px] text-slate-500">
         <span class="truncate max-w-[90px] font-mono">${track.durationStr || formatTime(track.duration)}</span>
-        <button onclick='window.App.openTrackMenu(${trackJson}, event)' class="p-1 rounded hover:text-slate-200 transition-colors">
+        <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-1 rounded hover:text-slate-200 transition-colors">
           <i data-lucide="more-horizontal" class="w-4 h-4"></i>
         </button>
       </div>
@@ -792,9 +1087,11 @@ function renderTrackCard(track, index, trackList) {
 }
 
 function renderTrackRow(track, index, trackList, playlistId = null) {
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
   const isLiked = Storage.isLiked(track.id);
-  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
-  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
     <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-indigo-500/50 bg-indigo-950/25 active-track-glow' : ''}">
@@ -810,31 +1107,35 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
         </div>
 
         <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
-          <img src="${track.artwork}" alt="${track.title}" class="w-full h-full object-cover" loading="lazy" />
-          <button onclick='window.App.playFromRow(${trackJson}, ${index})' class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover" loading="lazy" />
+          <button onclick="window.App.playFromRow('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
           </button>
         </div>
 
         <div class="min-w-0 flex-1">
-          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-indigo-400 font-bold' : 'text-slate-100'}">${track.title}</h4>
-          <p class="text-xs text-slate-400 truncate">${track.artist}</p>
+          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-indigo-400 font-bold' : 'text-slate-100'}">${escapeHtml(track.title)}</h4>
+          <p class="text-xs text-slate-400 truncate">${escapeHtml(track.artist)}</p>
         </div>
       </div>
 
-      <div class="flex items-center gap-3 ml-4">
+      <div class="flex items-center gap-2 sm:gap-3 ml-4">
         <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
         
-        <button onclick='window.App.toggleLike(${trackJson}, this)' class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Simpan Offline" class="p-2 text-slate-400 hover:text-amber-400 transition-colors">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
+
+        <button onclick="window.App.toggleLike('${trackId}', this)" class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
 
         ${playlistId ? `
-          <button onclick="window.App.removeFromPlaylist('${playlistId}', '${track.id}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+          <button onclick="window.App.removeFromPlaylist('${playlistId}', '${trackId}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         ` : `
-          <button onclick='window.App.openTrackMenu(${trackJson}, event)' class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
+          <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
             <i data-lucide="more-vertical" class="w-4 h-4"></i>
           </button>
         `}
@@ -894,6 +1195,17 @@ function setupPlayerSync() {
 
     if (window.lucide) window.lucide.createIcons();
     updateQueueDrawer();
+    if (AppState.currentDrawerTab === 'similar') {
+      renderSimilarTracksInDrawer();
+    }
+
+    // Auto-update lyrics when track changes
+    if (AppState.isLyricsModalOpen) {
+      loadAndRenderLyrics(track);
+    }
+    if (AppState.isFullscreenLyricsActive) {
+      loadAndRenderFullscreenLyrics(track);
+    }
   });
 
   Player.on('timeUpdate', ({ currentTime, duration }) => {
@@ -911,6 +1223,20 @@ function setupPlayerSync() {
     if (durationText) durationText.innerText = durStr;
     if (fsCurrentText) fsCurrentText.innerText = curStr;
     if (fsDurationText) fsDurationText.innerText = durStr;
+
+    // Update lyrics timer in modal
+    const lyricsTimer = document.getElementById('lyrics-playback-timer');
+    if (lyricsTimer) {
+      lyricsTimer.innerText = `${curStr} / ${durStr}`;
+    }
+
+    // Sync active lyric highlight
+    if (AppState.isLyricsModalOpen && AppState.lyricsDisplayMode === 'synced') {
+      syncLyricsHighlight(currentTime);
+    }
+    if (AppState.isFullscreenLyricsActive) {
+      syncFullscreenLyricsHighlight(currentTime);
+    }
 
     if (seekSlider && !seekSlider.dataset.dragging && duration > 0) {
       seekSlider.max = duration;
@@ -935,6 +1261,38 @@ function setupPlayerSync() {
 
   Player.on('queueChange', () => {
     updateQueueDrawer();
+  });
+
+  // Autoplay Rekomendasi Cerdas saat antrean selesai
+  Player.on('queueEnded', async ({ lastTrack, queue }) => {
+    if (Player.autoPlayRecommendations && navigator.onLine) {
+      try {
+        const nextTrack = await Recommendations.getAutoPlayTrack(queue, Storage.getHistory());
+        if (nextTrack) {
+          showToast(`Lanjut otomatis rekomendasi: ${nextTrack.title}`, 'info');
+          Player.playTrack(nextTrack);
+        }
+      } catch (e) {
+        console.warn('Autoplay error:', e);
+      }
+    }
+  });
+
+  // Listener status koneksi jaringan
+  Player.on('networkChange', ({ isOnline }) => {
+    const badge = document.getElementById('network-status-badge');
+    if (badge) {
+      if (isOnline) {
+        badge.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span>Online</span>';
+        showToast('Koneksi internet aktif kembali 🟢', 'success');
+      } else {
+        badge.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span><span>Mode Offline</span>';
+        showToast('Anda sedang offline. Menampilkan lagu tersimpan 💾', 'info');
+        switchView('offline');
+      }
+    }
   });
 
   // Shuffle & Repeat
@@ -1049,7 +1407,6 @@ function updateQueueDrawer() {
     } else {
       queueList.innerHTML = upcoming.map((t, idx) => {
         const actualIndex = currentIndex + 1 + idx;
-        const trackJson = JSON.stringify(t).replace(/'/g, "&#39;");
         return `
           <div onclick='window.Player.playTrack(window.Player.queue[${actualIndex}])' class="flex items-center gap-3 p-2 rounded-xl glass-panel hover:bg-indigo-600/30 cursor-pointer transition-colors group">
             <span class="text-xs text-slate-500 w-4 text-center font-mono">${idx + 1}</span>
@@ -1066,6 +1423,298 @@ function updateQueueDrawer() {
 
     if (countLabel) {
       countLabel.innerText = `${upcoming.length} Lagu berikutnya`;
+    }
+    const tabCount = document.getElementById('drawer-queue-tab-count');
+    if (tabCount) {
+      tabCount.innerText = upcoming.length;
+    }
+  }
+}
+
+// Render similar tracks tab in Queue Drawer
+async function renderSimilarTracksInDrawer() {
+  const container = document.getElementById('drawer-similar-list');
+  if (!container) return;
+
+  const current = Player.currentTrack;
+  if (!current) {
+    container.innerHTML = `
+      <div class="py-8 text-center text-xs text-slate-500">
+        Putar sebuah lagu untuk melihat rekomendasi lagu yang mirip!
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="py-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+      <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+      <span>Mencari lagu yang mirip dengan <strong>${current.title}</strong>...</span>
+    </div>
+  `;
+
+  try {
+    const similarTracks = await Recommendations.getSimilarTracks(current, 10);
+    if (!similarTracks || similarTracks.length === 0) {
+      container.innerHTML = `
+        <div class="py-8 text-center text-xs text-slate-500">
+          Belum menemukan lagu serupa. Coba putar lagu lain!
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = similarTracks.map((t, idx) => {
+      registerTrack(t);
+      const trackId = String(t.id);
+      return `
+        <div class="flex items-center gap-3 p-2 rounded-xl glass-panel hover:bg-indigo-600/30 transition-colors group">
+          <img src="${t.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(t.title)}" class="w-9 h-9 rounded-lg object-cover" />
+          <div class="min-w-0 flex-1 cursor-pointer" onclick="window.App.playSimilarTrackDirect('${trackId}')">
+            <h5 class="text-xs font-semibold text-slate-200 truncate group-hover:text-white">${escapeHtml(t.title)}</h5>
+            <p class="text-[10px] text-slate-400 truncate">${escapeHtml(t.artist)}</p>
+          </div>
+          <div class="flex items-center gap-1">
+            <button onclick="window.App.addSimilarTrackToQueue('${trackId}')" title="Tambah ke antrean" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+              <i data-lucide="list-plus" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Offline" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-white/10 transition-colors">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    if (window.lucide) window.lucide.createIcons();
+  } catch (err) {
+    container.innerHTML = `
+      <div class="py-8 text-center text-xs text-rose-400">
+        Gagal memuat rekomendasi lagu serupa.
+      </div>
+    `;
+  }
+}
+
+// ==================== LYRICS HANDLERS ====================
+
+async function loadAndRenderLyrics(track, customQuery = '') {
+  const modalArt = document.getElementById('lyrics-modal-art');
+  const modalTitle = document.getElementById('lyrics-modal-title');
+  const modalArtist = document.getElementById('lyrics-modal-artist');
+  const modalBg = document.getElementById('lyrics-bg-art');
+  const content = document.getElementById('lyrics-content');
+  const btnSynced = document.getElementById('btn-lyrics-mode-synced');
+  const btnPlain = document.getElementById('btn-lyrics-mode-plain');
+
+  if (!track && Player.currentTrack) track = Player.currentTrack;
+  if (!track) {
+    if (content) {
+      content.innerHTML = `
+        <div class="py-20 text-center text-slate-400 space-y-2">
+          <i data-lucide="music" class="w-8 h-8 text-slate-500 mx-auto"></i>
+          <p class="text-sm font-semibold">Pilih lagu untuk melihat lirik</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
+    return;
+  }
+
+  if (modalArt) modalArt.src = track.artwork || 'icons/icon-192.png';
+  if (modalTitle) modalTitle.innerText = track.title || 'Judul Lagu';
+  if (modalArtist) modalArtist.innerText = track.artist || 'Artis';
+  if (modalBg) modalBg.style.backgroundImage = `url('${track.artwork || ''}')`;
+
+  if (content) {
+    content.innerHTML = `
+      <div class="py-20 text-center text-slate-400 space-y-3">
+        <div class="w-7 h-7 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p class="text-sm font-medium">Mencari lirik untuk <span class="text-white font-bold">${track.title}</span>...</p>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  try {
+    const data = await Lyrics.fetchLyrics(track, customQuery);
+    if (!data || (!data.plainLyrics && !data.syncedLyrics)) {
+      if (content) {
+        content.innerHTML = `
+          <div class="py-20 text-center text-slate-400 space-y-4 max-w-md mx-auto">
+            <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-slate-400">
+              <i data-lucide="file-x" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h4 class="text-base font-bold text-white">Lirik Belum Tersedia</h4>
+              <p class="text-xs text-slate-400 mt-1">Kami belum menemukan lirik otomatis untuk lagu ini.</p>
+            </div>
+            <button onclick="window.App.toggleLyricsSearchBar(true)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md">
+              Coba Cari Manual 🔍
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+
+    // Jika lagu tidak memiliki synced lyrics, fallback ke plain
+    if (!data.isSynced && AppState.lyricsDisplayMode === 'synced') {
+      AppState.lyricsDisplayMode = 'plain';
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+    }
+
+    renderLyricsBody(data);
+  } catch (err) {
+    console.warn('Load lyrics error:', err);
+    if (content) {
+      content.innerHTML = `
+        <div class="py-20 text-center text-rose-400 space-y-2">
+          <p class="text-sm font-semibold">Gagal memuat lirik: ${err.message || 'Koneksi error'}</p>
+          <button onclick="window.App.toggleLyricsSearchBar(true)" class="text-xs text-indigo-400 hover:underline">
+            Cari manual
+          </button>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderLyricsBody(data) {
+  const content = document.getElementById('lyrics-content');
+  if (!content || !data) return;
+
+  if (AppState.lyricsDisplayMode === 'synced' && data.isSynced) {
+    // Mode Karaoke / Synced LRC
+    content.innerHTML = `
+      <div class="text-center py-6 space-y-3">
+        ${data.parsedLines.map((line, idx) => `
+          <div 
+            id="lyric-line-${idx}" 
+            class="lyric-line future text-base md:text-xl leading-relaxed" 
+            data-index="${idx}" 
+            data-time="${line.time}" 
+            onclick="window.App.seekToLyric(${line.time})"
+          >
+            ${line.text || '♪'}
+          </div>
+        `).join('')}
+      </div>
+    `;
+    AppState.activeLyricLineIndex = -1;
+    syncLyricsHighlight(Player.currentTime || 0);
+  } else {
+    // Mode Teks Lengkap (Plain)
+    const stanzas = data.plainLyrics ? data.plainLyrics.split(/\n\s*\n/) : ['Lirik teks tidak tersedia'];
+    content.innerHTML = `
+      <div class="space-y-6 py-6 text-center max-w-xl mx-auto">
+        ${stanzas.map(stanza => `
+          <div class="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+            ${stanza.split('\n').map(l => `<p class="text-sm md:text-base text-slate-200 leading-relaxed">${l.trim() || '&nbsp;'}</p>`).join('')}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+}
+
+function syncLyricsHighlight(currentTime) {
+  if (!Lyrics.currentLyrics || !Lyrics.currentLyrics.isSynced) return;
+  const idx = Lyrics.getActiveLineIndex(currentTime, 0.25);
+
+  if (idx !== AppState.activeLyricLineIndex) {
+    AppState.activeLyricLineIndex = idx;
+    const lines = Lyrics.currentLyrics.parsedLines;
+
+    for (let i = 0; i < lines.length; i++) {
+      const el = document.getElementById(`lyric-line-${i}`);
+      if (!el) continue;
+      if (i < idx) {
+        el.className = 'lyric-line past text-base md:text-xl leading-relaxed';
+      } else if (i === idx) {
+        el.className = 'lyric-line active text-lg md:text-2xl leading-relaxed';
+        // Auto scroll container
+        const container = document.getElementById('lyrics-scroll-container');
+        if (container) {
+          const elTop = el.offsetTop;
+          const targetScroll = elTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+          container.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+        }
+      } else {
+        el.className = 'lyric-line future text-base md:text-xl leading-relaxed';
+      }
+    }
+  }
+}
+
+async function loadAndRenderFullscreenLyrics(track) {
+  const container = document.getElementById('fs-lyrics-content');
+  if (!container) return;
+
+  if (!track && Player.currentTrack) track = Player.currentTrack;
+  if (!track) return;
+
+  container.innerHTML = `
+    <div class="py-12 text-center text-slate-400 flex flex-col items-center gap-2">
+      <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+      <span class="text-xs">Memuat lirik...</span>
+    </div>
+  `;
+
+  try {
+    const data = await Lyrics.fetchLyrics(track);
+    if (!data || (!data.plainLyrics && !data.syncedLyrics)) {
+      container.innerHTML = `
+        <div class="py-12 text-center text-slate-400 text-sm">
+          Lirik belum tersedia untuk lagu ini.
+        </div>
+      `;
+      return;
+    }
+
+    if (data.isSynced) {
+      container.innerHTML = data.parsedLines.map((line, idx) => `
+        <div 
+          id="fs-lyric-line-${idx}" 
+          class="fs-lyric-line inactive" 
+          data-time="${line.time}" 
+          onclick="window.App.seekToLyric(${line.time})"
+        >
+          ${line.text || '♪'}
+        </div>
+      `).join('');
+      syncFullscreenLyricsHighlight(Player.currentTime || 0);
+    } else {
+      container.innerHTML = `
+        <div class="text-slate-300 text-sm space-y-2 whitespace-pre-line py-4">
+          ${data.plainLyrics}
+        </div>
+      `;
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="py-12 text-center text-rose-400 text-xs">Gagal memuat lirik.</div>`;
+  }
+}
+
+function syncFullscreenLyricsHighlight(currentTime) {
+  if (!Lyrics.currentLyrics || !Lyrics.currentLyrics.isSynced) return;
+  const idx = Lyrics.getActiveLineIndex(currentTime, 0.25);
+  const lines = Lyrics.currentLyrics.parsedLines;
+
+  for (let i = 0; i < lines.length; i++) {
+    const el = document.getElementById(`fs-lyric-line-${i}`);
+    if (!el) continue;
+    if (i === idx) {
+      el.className = 'fs-lyric-line active';
+      const wrapper = document.getElementById('fullscreen-lyrics-wrapper');
+      if (wrapper) {
+        const elTop = el.offsetTop;
+        const targetScroll = elTop - (wrapper.clientHeight / 2) + (el.clientHeight / 2);
+        wrapper.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+      }
+    } else {
+      el.className = 'fs-lyric-line inactive';
     }
   }
 }
@@ -1136,26 +1785,34 @@ function openMobileSidebar() {
 
 // Global App API
 window.App = {
+  AppState,
   switchView,
-  playSingle(track) {
-    Player.playTrack(track);
+  playSingle(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (track) Player.playTrack(track);
   },
-  playFromCard(track, index) {
+  playFromCard(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
       Player.playTrack(track, AppState.currentTrackList);
     }
   },
-  playFromRow(track, index) {
+  playFromRow(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
       Player.playTrack(track, AppState.currentTrackList);
     }
   },
-  playStation(station) {
-    Player.playTrack(station);
+  playStation(stationOrId) {
+    let station = typeof stationOrId === 'object' ? stationOrId : RADIO_STATIONS.find(s => s.id === stationOrId);
+    if (!station) station = resolveTrack(stationOrId);
+    if (station) Player.playTrack(station);
   },
   playAllFavorites() {
     const liked = Storage.getLikedSongs();
@@ -1176,7 +1833,9 @@ window.App = {
       Player.playTrack(pl.tracks[0], pl.tracks);
     }
   },
-  toggleLike(track, el) {
+  toggleLike(trackOrId, el) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     const isNowLiked = Storage.toggleLike(track);
     showToast(isNowLiked ? 'Ditambahkan ke favorit!' : 'Dihapus dari favorit');
 
@@ -1226,21 +1885,23 @@ window.App = {
     showToast('Lagu dihapus dari playlist');
     renderPlaylistsView(plId);
   },
-  openTrackMenu(track, event) {
-    event.stopPropagation();
+  openTrackMenu(trackOrId, event) {
+    if (event) event.stopPropagation();
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     AppState.activeTrackMenu = track;
     const playlists = Storage.getPlaylists();
     const menu = document.getElementById('track-action-menu');
 
     document.getElementById('track-menu-playlists').innerHTML = playlists.map(pl => `
       <button onclick="window.App.addTrackToPlaylist('${pl.id}')" class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-indigo-600 hover:text-white transition-colors truncate">
-        + ${pl.name}
+        + ${escapeHtml(pl.name)}
       </button>
     `).join('');
 
     menu.classList.remove('hidden');
-    menu.style.top = `${Math.min(window.innerHeight - 200, event.clientY + 10)}px`;
-    menu.style.left = `${Math.min(window.innerWidth - 220, event.clientX - 100)}px`;
+    menu.style.top = `${Math.min(window.innerHeight - 200, (event ? event.clientY : 100) + 10)}px`;
+    menu.style.left = `${Math.min(window.innerWidth - 220, (event ? event.clientX : 100) - 100)}px`;
   },
   addTrackToPlaylist(playlistId) {
     if (AppState.activeTrackMenu) {
@@ -1269,12 +1930,37 @@ window.App = {
         if (recordContainer) recordContainer.classList.add('hidden');
         if (btn) btn.classList.add('text-indigo-400');
         showToast('Mode Video Klip Aktif');
+        if (Player.currentTrack && Player.isDirectAudioActive) {
+          const curTime = Player.audio.currentTime || 0;
+          Player.audio.pause();
+          Player.isDirectAudioActive = false;
+          const videoId = Player.currentTrack.videoId || (Player.currentTrack.id && Player.currentTrack.id.startsWith('yt-') ? Player.currentTrack.id.replace('yt-', '') : null);
+          if (videoId && Player.ytPlayer && Player.isYtReady) {
+            try {
+              Player.ytPlayer.loadVideoById(videoId, curTime);
+              if (Player.isPlaying) Player.ytPlayer.playVideo();
+            } catch (e) {}
+          }
+        }
       } else {
         videoContainer.classList.remove('visible-player');
         videoContainer.classList.add('invisible-player');
         if (recordContainer) recordContainer.classList.remove('hidden');
         if (btn) btn.classList.remove('text-indigo-400');
-        showToast('Mode Piringan Hitam (Vinyl) Aktif');
+        showToast('Mode Audio & Background Aktif');
+        if (Player.currentTrack && !Player.isDirectAudioActive) {
+          const curTime = (Player.ytPlayer && Player.isYtReady) ? Player.ytPlayer.getCurrentTime() : 0;
+          if (Player.ytPlayer && Player.isYtReady) {
+            try { Player.ytPlayer.pauseVideo(); } catch (e) {}
+          }
+          Player.isDirectAudioActive = true;
+          const videoId = Player.currentTrack.videoId || (Player.currentTrack.id && Player.currentTrack.id.startsWith('yt-') ? Player.currentTrack.id.replace('yt-', '') : null);
+          if (videoId) {
+            Player.audio.src = `/api/stream?id=${videoId}&title=${encodeURIComponent(Player.currentTrack.title || '')}&redirect=1`;
+            Player.audio.currentTime = curTime;
+            if (Player.isPlaying) Player.audio.play().catch(() => {});
+          }
+        }
       }
     }
   },
@@ -1504,25 +2190,7 @@ window.App = {
     if (!track) return;
     const menu = document.getElementById('track-action-menu');
     if (menu) menu.classList.add('hidden');
-
-    if (track.url && !track.url.includes('youtube.com') && !track.url.includes('youtu.be') && !track.isYouTube) {
-      const a = document.createElement('a');
-      a.href = track.url;
-      a.download = `${track.title} - ${track.artist}.mp3`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showToast(`Mengunduh lagu: ${track.title}`, 'success');
-    } else {
-      const ytId = track.youtubeId || (track.url && track.url.includes('v=') ? track.url.split('v=')[1]?.split('&')[0] : null);
-      const ytUrl = ytId ? `https://www.youtube.com/watch?v=${ytId}` : (track.url || '');
-      if (ytUrl) {
-        window.open(ytUrl, '_blank');
-        showToast(`Membuka tautan YouTube: ${track.title}`, 'info');
-      } else {
-        showToast('Tautan trek tidak dapat diunduh langsung', 'error');
-      }
-    }
+    this.openDownloadModal(track);
   },
 
   // Mobile Connect & QR Code Modal (iPhone & Android)
@@ -1591,6 +2259,14 @@ window.App = {
     this.openMobileModal('android');
   },
 
+  openSafariBackgroundModal() {
+    const modal = document.getElementById('safari-bg-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  },
+
   async copyAndroidUrl() {
     const input = document.getElementById('android-direct-url');
     if (!input || !input.value) return;
@@ -1601,6 +2277,341 @@ window.App = {
       input.select();
       document.execCommand('copy');
       showToast('Tautan disalin ke clipboard!', 'success');
+    }
+  },
+
+  // Queue Drawer Tab Switcher
+  switchDrawerTab(tab) {
+    AppState.currentDrawerTab = tab;
+    const tabQueue = document.getElementById('drawer-tab-queue');
+    const tabSimilar = document.getElementById('drawer-tab-similar');
+    const queueList = document.getElementById('drawer-queue-list');
+    const similarList = document.getElementById('drawer-similar-list');
+
+    if (tab === 'similar') {
+      if (tabSimilar) {
+        tabSimilar.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1';
+      }
+      if (tabQueue) {
+        tabQueue.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      }
+      if (queueList) queueList.classList.add('hidden');
+      if (similarList) {
+        similarList.classList.remove('hidden');
+        renderSimilarTracksInDrawer();
+      }
+    } else {
+      if (tabQueue) {
+        tabQueue.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+      }
+      if (tabSimilar) {
+        tabSimilar.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1';
+      }
+      if (queueList) queueList.classList.remove('hidden');
+      if (similarList) similarList.classList.add('hidden');
+    }
+  },
+
+  async refreshPersonalizedRecommendations() {
+    await loadRecommendationsSection();
+    showToast('Rekomendasi berhasil diperbarui!', 'success');
+  },
+
+  playSimilarTrackDirect(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
+    Player.playTrack(track);
+    showToast(`Memutar: ${track.title}`, 'success');
+  },
+
+  addSimilarTrackToQueue(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
+    Player.addToQueue(track);
+    showToast(`Ditambahkan ke antrean: ${track.title}`, 'info');
+    updateQueueDrawer();
+  },
+
+  // Offline & Download Management
+  async openDownloadModal(trackOrId) {
+    let track = resolveTrack(trackOrId);
+    if (!track) {
+      if (Player.currentTrack) track = Player.currentTrack;
+      else {
+        showToast('Pilih lagu yang ingin di-download terlebih dahulu', 'error');
+        return;
+      }
+    }
+    AppState.pendingDownloadTrack = track;
+    const modal = document.getElementById('track-download-modal');
+    if (!modal) return;
+
+    const art = document.getElementById('dl-modal-art');
+    const title = document.getElementById('dl-modal-title');
+    const artist = document.getElementById('dl-modal-artist');
+    const status = document.getElementById('dl-modal-status');
+    const progressContainer = document.getElementById('dl-progress-bar-container');
+
+    if (art) art.src = track.artwork || 'icons/icon-192.png';
+    if (title) title.innerText = track.title || 'Judul Lagu';
+    if (artist) artist.innerText = track.artist || 'Artis';
+
+    if (progressContainer) progressContainer.classList.add('hidden');
+
+    try {
+      const isSaved = await OfflineStorage.isTrackSaved(track.id);
+      if (status) {
+        if (isSaved) {
+          status.innerText = 'Sudah tersimpan di Offline PWA ✅';
+          status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono';
+        } else {
+          status.innerText = 'Siap disimpan untuk mode offline';
+          status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono';
+        }
+      }
+    } catch (e) {
+      if (status) {
+        status.innerText = 'Siap disimpan';
+        status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono';
+      }
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  async confirmSaveOffline() {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+
+    const progressContainer = document.getElementById('dl-progress-bar-container');
+    const progressBar = document.getElementById('dl-progress-bar');
+    const progressText = document.getElementById('dl-progress-text');
+    const status = document.getElementById('dl-modal-status');
+
+    if (progressContainer) progressContainer.classList.remove('hidden');
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.innerText = 'Menyiapkan audio...';
+
+    try {
+      await OfflineStorage.downloadAndStoreTrack(track, (info) => {
+        const percent = typeof info === 'number' ? info : (info && info.percent ? info.percent : 50);
+        const msg = (info && info.message) ? info.message : `Menyimpan ${percent}%...`;
+        if (progressBar) progressBar.style.width = `${percent}%`;
+        if (progressText) progressText.innerText = msg;
+      });
+
+      if (progressBar) progressBar.style.width = '100%';
+      if (progressText) progressText.innerText = 'Selesai tersimpan! 💾';
+      if (status) {
+        status.innerText = 'Sudah tersimpan di Offline PWA ✅';
+        status.className = 'inline-block mt-1 px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono';
+      }
+
+      await updateOfflineBadgeCount();
+      if (AppState.currentView === 'offline') {
+        await loadAndRenderOfflineTracks();
+      }
+
+      showToast(`"${track.title}" berhasil disimpan di Offline PWA! Bisa diputar tanpa kuota 🎉`, 'success');
+
+      setTimeout(() => {
+        const modal = document.getElementById('track-download-modal');
+        if (modal) modal.classList.add('hidden');
+      }, 900);
+    } catch (err) {
+      console.error('Gagal menyimpan offline:', err);
+      if (progressText) progressText.innerText = 'Gagal menyimpan audio';
+      showToast(err.message || 'Gagal menyimpan lagu ke offline', 'error');
+    }
+  },
+
+  async confirmDownloadFile(server = 'ytmp3') {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+
+    try {
+      const res = await OfflineStorage.downloadToDevice(track, server);
+      if (res && res.mode === 'converter') {
+        showToast(`Link lagu otomatis disalin! Silakan Paste di konverter untuk download MP3 320kbps 🎵`, 'success');
+      } else {
+        showToast(`Mengunduh berkas audio "${track.title}" ke penyimpanan perangkat...`, 'success');
+      }
+      const modal = document.getElementById('track-download-modal');
+      if (modal) modal.classList.add('hidden');
+    } catch (err) {
+      showToast('Gagal mengunduh file: ' + err.message, 'error');
+    }
+  },
+
+  async copyPendingTrackLink() {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+    const rawId = track.videoId || track.id;
+    const videoId = typeof rawId === 'string' && rawId.startsWith('yt-') ? rawId.replace('yt-', '') : String(rawId);
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(ytUrl);
+        showToast(`Link lagu disalin ke clipboard! 📋`, 'success');
+      } else {
+        prompt('Salin link lagu ini:', ytUrl);
+      }
+    } catch (e) {
+      prompt('Salin link lagu ini:', ytUrl);
+    }
+  },
+
+  async deleteOfflineTrack(id) {
+    if (!confirm('Hapus lagu ini dari perpustakaan offline?')) return;
+    try {
+      await OfflineStorage.deleteTrack(id);
+      showToast('Lagu berhasil dihapus dari offline', 'info');
+      await updateOfflineBadgeCount();
+      await loadAndRenderOfflineTracks();
+    } catch (err) {
+      showToast('Gagal menghapus lagu: ' + err.message, 'error');
+    }
+  },
+
+  playOfflineTrack(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
+    if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
+      Player.togglePlay();
+    } else {
+      Player.playTrack(track, AppState.offlineTracks);
+    }
+  },
+
+  playAllOfflineTracks() {
+    if (AppState.offlineTracks && AppState.offlineTracks.length > 0) {
+      Player.playTrack(AppState.offlineTracks[0], AppState.offlineTracks);
+    } else {
+      showToast('Belum ada lagu offline tersimpan', 'info');
+    }
+  },
+
+  // Lyrics & Karaoke Methods
+  openLyricsModal(track) {
+    if (!track) {
+      if (Player.currentTrack) track = Player.currentTrack;
+      else {
+        showToast('Pilih dan putar lagu terlebih dahulu untuk melihat lirik', 'info');
+        return;
+      }
+    }
+    const modal = document.getElementById('lyrics-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    AppState.isLyricsModalOpen = true;
+
+    // Prefill query input
+    const sInput = document.getElementById('lyrics-manual-input');
+    if (sInput) sInput.value = `${track.artist} ${Lyrics.cleanQuery(track.title, track.artist)}`.trim();
+
+    loadAndRenderLyrics(track);
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  closeLyricsModal() {
+    const modal = document.getElementById('lyrics-modal');
+    if (modal) modal.classList.add('hidden');
+    AppState.isLyricsModalOpen = false;
+  },
+
+  toggleLyricsSearchBar(forceOpen = null) {
+    const bar = document.getElementById('lyrics-search-bar');
+    if (!bar) return;
+    if (forceOpen === true) bar.classList.remove('hidden');
+    else if (forceOpen === false) bar.classList.add('hidden');
+    else bar.classList.toggle('hidden');
+
+    if (!bar.classList.contains('hidden')) {
+      const input = document.getElementById('lyrics-manual-input');
+      if (input) setTimeout(() => input.focus(), 100);
+    }
+  },
+
+  async searchLyricsManual() {
+    const input = document.getElementById('lyrics-manual-input');
+    const query = input ? input.value.trim() : '';
+    if (!query) {
+      showToast('Ketikkan judul atau artis lagu yang ingin dicari', 'error');
+      return;
+    }
+    showToast(`Mencari lirik: "${query}"...`, 'info');
+    await loadAndRenderLyrics(Player.currentTrack, query);
+  },
+
+  switchLyricsDisplayMode(mode) {
+    AppState.lyricsDisplayMode = mode;
+    const btnSynced = document.getElementById('btn-lyrics-mode-synced');
+    const btnPlain = document.getElementById('btn-lyrics-mode-plain');
+
+    if (mode === 'synced') {
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all flex items-center gap-1.5';
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+    } else {
+      if (btnPlain) btnPlain.className = 'px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow transition-all';
+      if (btnSynced) btnSynced.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1.5';
+    }
+
+    if (Lyrics.currentLyrics) {
+      renderLyricsBody(Lyrics.currentLyrics);
+    }
+  },
+
+  toggleFullscreenLyrics() {
+    AppState.isFullscreenLyricsActive = !AppState.isFullscreenLyricsActive;
+    const record = document.getElementById('fullscreen-record');
+    const lyricsWrapper = document.getElementById('fullscreen-lyrics-wrapper');
+    const btn = document.getElementById('btn-toggle-fs-lyrics');
+    const btnText = document.getElementById('fs-lyrics-btn-text');
+
+    if (AppState.isFullscreenLyricsActive) {
+      if (record) record.classList.add('hidden');
+      if (lyricsWrapper) {
+        lyricsWrapper.classList.remove('hidden');
+        loadAndRenderFullscreenLyrics(Player.currentTrack);
+      }
+      if (btn) btn.classList.add('bg-pink-600', 'text-white');
+      if (btnText) btnText.innerText = 'Vinyl';
+      showToast('Mode Lirik Layar Penuh Aktif 🎤');
+    } else {
+      if (lyricsWrapper) lyricsWrapper.classList.add('hidden');
+      if (record) record.classList.remove('hidden');
+      if (btn) btn.classList.remove('bg-pink-600', 'text-white');
+      if (btnText) btnText.innerText = 'Lirik';
+      showToast('Mode Piringan Hitam Aktif 💿');
+    }
+  },
+
+  seekToLyric(seconds) {
+    if (typeof seconds === 'number' && !isNaN(seconds)) {
+      Player.seek(seconds);
+      showToast(`Melompat ke ${formatTime(seconds)}`);
+    }
+  },
+
+  async copyCurrentLyrics() {
+    if (!Lyrics.currentLyrics) {
+      showToast('Belum ada lirik untuk disalin', 'error');
+      return;
+    }
+    const textToCopy = Lyrics.currentLyrics.plainLyrics || 
+      (Lyrics.currentLyrics.parsedLines ? Lyrics.currentLyrics.parsedLines.map(l => l.text).join('\n') : '');
+    
+    if (!textToCopy) {
+      showToast('Lirik kosong', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(`${Lyrics.currentLyrics.title} - ${Lyrics.currentLyrics.artist}\n\n${textToCopy}`);
+      showToast('Lirik lagu berhasil disalin ke clipboard! 📋', 'success');
+    } catch (e) {
+      showToast('Gagal menyalin lirik', 'error');
     }
   }
 };
@@ -1646,6 +2657,9 @@ function setupKeyboardShortcuts() {
           window.App.toggleLike(Player.currentTrack, document.getElementById('player-like-btn'));
         }
         break;
+      case 'KeyK':
+        window.App.openLyricsModal();
+        break;
       case 'KeyQ':
         window.App.toggleQueueDrawer();
         break;
@@ -1676,12 +2690,16 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEqualizer();
   setupFullscreenOverlay();
   setupKeyboardShortcuts();
+  updateOfflineBadgeCount();
 
-  // Service Worker Registration for PWA & Offline Caching
+  // Service Worker Registration for PWA & Offline Caching (v7 - Instant Activation)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(reg => console.log('HarmoniX Service Worker terdaftar:', reg.scope))
+      navigator.serviceWorker.register('./sw.js?v=7.0')
+        .then(reg => {
+          console.log('HarmoniX Service Worker v7 terdaftar:', reg.scope);
+          reg.update();
+        })
         .catch(err => console.log('HarmoniX Service Worker gagal:', err));
     });
   }
@@ -1702,14 +2720,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Search input & Live Suggestions
   const searchInput = document.getElementById('global-search-input');
+  const searchForm = document.getElementById('global-search-form');
+  const searchClearBtn = document.getElementById('global-search-clear');
   let searchTimeout = null;
   let suggestTimeout = null;
+
+  const triggerSearch = (query) => {
+    clearTimeout(searchTimeout);
+    clearTimeout(suggestTimeout);
+    hideSuggestions();
+    if (searchInput) searchInput.blur();
+    if (query) {
+      switchView('search', query);
+    } else {
+      switchView('discover');
+    }
+  };
+
+  if (searchForm) {
+    searchForm.onsubmit = (e) => {
+      e.preventDefault();
+      const query = searchInput ? searchInput.value.trim() : '';
+      triggerSearch(query);
+    };
+  }
+
+  if (searchClearBtn && searchInput) {
+    searchClearBtn.onclick = () => {
+      searchInput.value = '';
+      searchClearBtn.classList.add('hidden');
+      triggerSearch('');
+    };
+  }
 
   if (searchInput) {
     searchInput.oninput = (e) => {
       clearTimeout(searchTimeout);
       clearTimeout(suggestTimeout);
       const query = e.target.value.trim();
+
+      if (searchClearBtn) {
+        if (query) searchClearBtn.classList.remove('hidden');
+        else searchClearBtn.classList.add('hidden');
+      }
 
       if (!query) {
         hideSuggestions();
@@ -1729,11 +2782,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     searchInput.onkeydown = (e) => {
       if (e.key === 'Enter') {
-        clearTimeout(searchTimeout);
-        clearTimeout(suggestTimeout);
-        hideSuggestions();
+        e.preventDefault();
         const query = searchInput.value.trim();
-        if (query) switchView('search', query);
+        triggerSearch(query);
       }
     };
   }
