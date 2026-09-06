@@ -362,8 +362,9 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             stream_info = None
+            title_param = query_params.get('title', [''])[0].strip()
             if get_audio_stream_url:
-                stream_info = get_audio_stream_url(vid)
+                stream_info = get_audio_stream_url(vid, title_param)
 
             if stream_info:
                 self.send_response(200)
@@ -393,7 +394,7 @@ class handler(BaseHTTPRequestHandler):
 
             stream_info = None
             if get_audio_stream_url:
-                stream_info = get_audio_stream_url(vid)
+                stream_info = get_audio_stream_url(vid, title_param)
 
             if not stream_info or not stream_info.get('streamUrl'):
                 target_url = f"https://www.y2meta.mobi/en/youtube-to-mp3/{vid}"

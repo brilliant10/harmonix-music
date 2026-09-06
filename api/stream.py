@@ -4,15 +4,20 @@ import urllib.request
 import json
 import re
 
-def get_audio_stream_url(video_id):
-    # Method 1: yt-dlp
+def get_audio_stream_url(video_id, title=None):
+    # Method 1: yt-dlp with android/ios player client
     try:
         import yt_dlp
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': False
+            'extract_flat': False,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios']
+                }
+            }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=False)
@@ -28,41 +33,38 @@ def get_audio_stream_url(video_id):
     except Exception as e:
         print('yt-dlp stream error:', e)
 
-    # Method 2: Innertube Android Client fallback
+    # Method 2: Official iTunes Audio Stream Fallback
     try:
-        url = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
-        payload = {
-            "context": {
-                "client": {
-                    "clientName": "WEB_EMBEDDED_PLAYER",
-                    "clientVersion": "1.20240101.01.00",
-                    "hl": "id",
-                    "gl": "ID"
-                }
-            },
-            "videoId": video_id
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            formats = data.get("streamingData", {}).get("adaptiveFormats", [])
-            audio_formats = [f for f in formats if f.get("mimeType", "").startswith("audio/")]
-            if audio_formats:
-                best = audio_formats[0]
-                if best.get("url"):
+        search_query = title or ''
+        if not search_query and video_id:
+            try:
+                oe_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+                req_oe = urllib.request.Request(oe_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req_oe, timeout=4) as oe_resp:
+                    oe_data = json.loads(oe_resp.read().decode('utf-8'))
+                    search_query = oe_data.get('title', '')
+            except Exception:
+                pass
+
+        if search_query:
+            clean_q = re.sub(r'[\(\[\{].*?(official|music video|video|lyric|audio|visualizer|mv|lirik|remastered|hd|4k|hq).*?[\)\]\}]', '', search_query, flags=re.IGNORECASE)
+            clean_q = re.sub(r'\|\s*(official|music video|video|audio).*', '', clean_q, flags=re.IGNORECASE).strip()
+            itunes_url = f"https://itunes.apple.com/search?term={urllib.parse.quote(clean_q)}&entity=song&limit=3"
+            req_it = urllib.request.Request(itunes_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req_it, timeout=4) as it_resp:
+                it_data = json.loads(it_resp.read().decode('utf-8'))
+                results = it_data.get('results', [])
+                if results and results[0].get('previewUrl'):
+                    first = results[0]
                     return {
-                        'streamUrl': best.get("url"),
-                        'title': data.get("videoDetails", {}).get("title", "Track"),
-                        'artist': data.get("videoDetails", {}).get("author", "Artis"),
-                        'duration': int(data.get("videoDetails", {}).get("lengthSeconds", 210)),
-                        'mimeType': best.get("mimeType", "audio/mp4")
+                        'streamUrl': first['previewUrl'],
+                        'title': first.get('trackName', search_query),
+                        'artist': first.get('artistName', 'Artis'),
+                        'duration': int(first.get('trackTimeMillis', 210000) / 1000),
+                        'mimeType': 'audio/mp4'
                     }
     except Exception as e:
-        print('Innertube stream error:', e)
+        print('iTunes stream fallback error:', e)
 
     return None
 
@@ -91,7 +93,8 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'status': 'error', 'message': 'Missing id parameter'}).encode('utf-8'))
             return
 
-        result = get_audio_stream_url(vid)
+        title_param = query_params.get('title', [''])[0].strip()
+        result = get_audio_stream_url(vid, title_param)
 
         if result:
             self.send_response(200)

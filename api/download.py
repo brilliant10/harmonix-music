@@ -36,7 +36,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(b'Missing id parameter')
             return
 
-        stream_info = get_audio_stream_url(vid)
+        stream_info = get_audio_stream_url(vid, title_param)
 
         if not stream_info or not stream_info.get('streamUrl'):
             # Fallback redirect to a fast online converter if stream extraction fails
