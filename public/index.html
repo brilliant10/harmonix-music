@@ -53,7 +53,7 @@
   <script src="https://www.youtube.com/iframe_api"></script>
 
   <!-- Custom Styles, Aurora & Glassmorphism -->
-  <link rel="stylesheet" href="css/style.css?v=6.0" />
+  <link rel="stylesheet" href="css/style.css?v=7.0" />
 </head>
 
 <body class="bg-[#050811] text-slate-100 h-screen w-screen overflow-hidden antialiased selection:bg-indigo-500 selection:text-white relative">
@@ -855,17 +855,17 @@
       </div>
 
       <!-- Download Options -->
-      <div class="space-y-2.5">
-        <!-- Opsi 1: Simpan ke Offline PWA (IndexedDB) -->
-        <div class="p-3.5 rounded-2xl glass-panel border border-amber-500/30 hover:border-amber-500 transition-all cursor-pointer group" onclick="window.App.confirmSaveOffline()">
+      <div class="space-y-3">
+        <!-- Opsi 1: Simpan ke Perpustakaan Offline PWA (IndexedDB) -->
+        <div class="p-4 rounded-2xl glass-panel border border-amber-500/30 hover:border-amber-500 transition-all cursor-pointer group" onclick="window.App.confirmSaveOffline()">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <i data-lucide="cloud-off" class="w-5 h-5"></i>
+              <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <i data-lucide="bookmark-plus" class="w-5 h-5"></i>
               </div>
               <div>
-                <h5 class="text-xs font-bold text-white">Simpan ke Perpustakaan Offline PWA ⚡</h5>
-                <p class="text-[10px] text-slate-400">Putar di iPhone & Android tanpa kuota/internet.</p>
+                <h5 class="text-xs font-bold text-white">Simpan ke Perpustakaan PWA ⚡</h5>
+                <p class="text-[10px] text-slate-400">Tersimpan di daftar HarmoniX Anda & siap putar full kapan saja.</p>
               </div>
             </div>
             <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all"></i>
@@ -879,19 +879,47 @@
           </div>
         </div>
 
-        <!-- Opsi 2: Download File MP3 ke HP / Komputer -->
-        <div class="p-3.5 rounded-2xl glass-panel border border-white/5 hover:border-emerald-500/40 transition-all cursor-pointer group" onclick="window.App.confirmDownloadFile()">
+        <!-- Opsi 2: Download File MP3 Asli ke HP / Komputer -->
+        <div class="p-4 rounded-2xl glass-panel border border-emerald-500/30 space-y-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <div class="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center">
                 <i data-lucide="file-audio" class="w-5 h-5"></i>
               </div>
               <div>
-                <h5 class="text-xs font-bold text-white">Unduh File Audio ke HP / Laptop</h5>
-                <p class="text-[10px] text-slate-400">Simpan berkas audio ke folder download perangkat.</p>
+                <h5 class="text-xs font-bold text-white">Unduh File MP3 Asli ke HP / Laptop 🎵</h5>
+                <p class="text-[10px] text-emerald-400/90 font-medium">Kualitas 320kbps • Bisa diputar di Files iPhone & Android</p>
               </div>
             </div>
-            <i data-lucide="external-link" class="w-4 h-4 text-slate-400 group-hover:text-emerald-400 transition-colors"></i>
+          </div>
+
+          <!-- Server Downloader Buttons -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            <button onclick="window.App.confirmDownloadFile('ytmp3')" class="flex items-center justify-between px-3 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/60 border border-indigo-500/30 text-indigo-200 hover:text-white text-xs font-semibold transition-all">
+              <span class="flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i> Server 1 (YTMP3)
+              </span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5 opacity-60"></i>
+            </button>
+            <button onclick="window.App.confirmDownloadFile('snapsave')" class="flex items-center justify-between px-3 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 text-emerald-200 hover:text-white text-xs font-semibold transition-all">
+              <span class="flex items-center gap-1.5">
+                <i data-lucide="smartphone" class="w-3.5 h-3.5 text-emerald-400"></i> Server 2 (SnapSave)
+              </span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5 opacity-60"></i>
+            </button>
+          </div>
+
+          <!-- Salin Link Saja & Tips -->
+          <div class="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+            <button onclick="window.App.copyPendingTrackLink()" class="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 font-medium py-1 transition-colors">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> Salin Link YouTube Lagu
+            </button>
+            <span class="text-[10px] text-slate-500 font-mono">100% Bebas Kuota</span>
+          </div>
+
+          <!-- Panduan iPhone / Android -->
+          <div class="p-2.5 rounded-xl bg-black/30 border border-white/5 text-[10px] text-slate-400 leading-relaxed">
+            <p><strong class="text-slate-200">📱 Panduan iPhone (iOS):</strong> Klik salah satu Server di atas. Link lagu otomatis disalin ke clipboard Anda. Di tab downloader, tekan <strong>Tempel / Paste</strong> lalu unduh berkas MP3. File akan masuk ke aplikasi <strong>Files (File) ➔ Unduhan</strong> di iPhone Anda!</p>
           </div>
         </div>
       </div>
@@ -1044,6 +1072,6 @@
   </div>
 
   <!-- Main JavaScript App Entry -->
-  <script type="module" src="js/app.js?v=6.0"></script>
+  <script type="module" src="js/app.js?v=7.0"></script>
 </body>
 </html>

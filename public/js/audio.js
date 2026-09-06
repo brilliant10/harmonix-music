@@ -297,51 +297,13 @@ class AudioEngine {
       if (document.hidden) {
         if (this.isPlaying) {
           this.startSafariKeepalive();
-
-          if (this.isCurrentTrackYouTube() && this.currentTrack && this.currentTrack.directStreamUrl) {
-            const curTime = this.getCurrentTime();
-            try {
-              if (this.ytPlayer && this.isYtReady) {
-                this.ytPlayer.pauseVideo();
-              }
-              this.isDirectAudioActive = true;
-              this.audio.src = this.currentTrack.directStreamUrl;
-              this.audio.currentTime = curTime;
-              this.audio.volume = this.volume;
-              this.audio.muted = this.isMuted;
-              this.audio.play().catch(err => console.warn('Background audio switch failed:', err));
-            } catch (e) {
-              console.warn('Visibility audio switch error:', e);
-            }
-          }
         }
       } else {
-        if (this.isDirectAudioActive && this.isPlaying) {
-          const curTime = this.audio.currentTime || 0;
-          this.isDirectAudioActive = false;
-          this.audio.pause();
-          if (this.ytPlayer && this.isYtReady) {
-            try {
-              this.ytPlayer.seekTo(curTime, true);
-              this.ytPlayer.playVideo();
-            } catch (e) {}
-          }
+        if (this.isPlaying) {
+          this.startSafariKeepalive();
         }
       }
     });
-  }
-
-  async fetchDirectAudioStream(track, videoId) {
-    if (!videoId || track.directStreamUrl) return;
-    try {
-      const res = await fetch(`/api/stream?id=${videoId}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data && json.data.streamUrl) {
-          track.directStreamUrl = json.data.streamUrl;
-        }
-      }
-    } catch (e) {}
   }
 
   getCurrentTime() {
@@ -374,10 +336,14 @@ class AudioEngine {
   }
 
   isCurrentTrackYouTube() {
-    if (this.currentTrack && (this.currentTrack.isOffline || this.currentTrack.audioBlob || this.currentTrack.source === 'offline')) {
+    if (this.currentTrack && this.currentTrack.audioBlob && (this.currentTrack.source === 'local' || !this.currentTrack.videoId)) {
       return false;
     }
-    return !!(this.currentTrack && (this.currentTrack.source === 'youtube' || this.currentTrack.videoId));
+    return !!(this.currentTrack && (
+      this.currentTrack.source === 'youtube' ||
+      this.currentTrack.videoId ||
+      (typeof this.currentTrack.id === 'string' && this.currentTrack.id.startsWith('yt-'))
+    ));
   }
 
   // --- Playback Control ---
@@ -408,8 +374,8 @@ class AudioEngine {
     this.emit('trackChange', track);
     this.updateMediaSessionMetadata();
 
-    // 1. Jika lagu offline (disimpan di IndexedDB)
-    if (track.isOffline || track.audioBlob || track.source === 'offline') {
+    // 1. Jika lagu berkas lokal (memiliki audioBlob nyata dari unggahan perangkat)
+    if (track.audioBlob && (track.source === 'local' || !track.videoId)) {
       if (this.isYtReady && this.ytPlayer) {
         try { this.ytPlayer.stopVideo(); } catch (e) {}
       }
@@ -420,12 +386,8 @@ class AudioEngine {
       }
 
       try {
-        if (track.audioBlob) {
-          this.currentBlobUrl = URL.createObjectURL(track.audioBlob);
-          this.audio.src = this.currentBlobUrl;
-        } else if (track.streamUrl) {
-          this.audio.src = track.streamUrl;
-        }
+        this.currentBlobUrl = URL.createObjectURL(track.audioBlob);
+        this.audio.src = this.currentBlobUrl;
         this.audio.volume = this.volume;
         this.audio.muted = this.isMuted;
         await this.audio.play();
@@ -434,69 +396,37 @@ class AudioEngine {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         this.emit('playState', true);
       } catch (e) {
-        console.warn('Pemutaran offline gagal:', e);
+        console.warn('Pemutaran offline berkas lokal gagal:', e);
       }
     }
-    // 2. Jika lagu online YouTube
+    // 2. Jika lagu YouTube (Search, Trending, Rekomendasi, maupun Lagu Tersimpan PWA)
+    // Memutar 100% FULL lagu menggunakan YouTube IFrame Player (bebas batas 30 detik & bebas blokir)
     else if (this.isCurrentTrackYouTube()) {
-      const videoId = track.videoId || track.id.replace('yt-', '');
+      const rawId = track.videoId || track.id;
+      const videoId = typeof rawId === 'string' && rawId.startsWith('yt-') ? rawId.replace('yt-', '') : String(rawId);
+
       this.startSafariKeepalive();
+      this.audio.pause();
+      this.isDirectAudioActive = false;
 
-      const isVideoModeActive = window.App && window.App.AppState && window.App.AppState.isVideoMode;
-
-      if (isVideoModeActive) {
-        this.audio.pause();
-        this.isDirectAudioActive = false;
-        if (this.isYtReady && this.ytPlayer) {
-          try {
-            this.ytPlayer.unMute();
-            this.ytPlayer.setVolume(this.volume * 100);
-            this.ytPlayer.loadVideoById(videoId);
-            this.ytPlayer.playVideo();
-            this.isPlaying = true;
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-            this.emit('playState', true);
-          } catch (e) {
-            console.warn('YT loadVideoById error:', e);
-          }
-        } else {
-          this.pendingYtVideoId = videoId;
-        }
-      } else {
-        // Audio Mode (Default & Safari iOS 100% Background Audio)
-        if (this.isYtReady && this.ytPlayer) {
-          try { this.ytPlayer.stopVideo(); } catch (e) {}
-        }
-        this.isDirectAudioActive = true;
-        const streamUrl = `/api/stream?id=${videoId}&title=${encodeURIComponent(track.title || '')}&redirect=1`;
-        this.audio.src = streamUrl;
-        this.audio.volume = this.volume;
-        this.audio.muted = this.isMuted;
+      if (this.isYtReady && this.ytPlayer) {
         try {
-          await this.audio.play();
+          this.ytPlayer.unMute();
+          this.ytPlayer.setVolume(this.volume * 100);
+          this.ytPlayer.loadVideoById(videoId);
+          this.ytPlayer.playVideo();
           this.isPlaying = true;
-          this.startSafariKeepalive();
           if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
           this.emit('playState', true);
-        } catch (err) {
-          console.warn('Direct stream audio play failed, falling back to YouTube iframe:', err);
-          this.isDirectAudioActive = false;
-          if (this.isYtReady && this.ytPlayer) {
-            this.ytPlayer.unMute();
-            this.ytPlayer.setVolume(this.volume * 100);
-            this.ytPlayer.loadVideoById(videoId);
-            this.ytPlayer.playVideo();
-            this.isPlaying = true;
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-            this.emit('playState', true);
-          } else {
-            this.pendingYtVideoId = videoId;
-          }
+        } catch (e) {
+          console.warn('YT loadVideoById error:', e);
         }
+      } else {
+        this.pendingYtVideoId = videoId;
       }
     } 
-    // 3. Jika lagu lokal atau radio internet
-    else {
+    // 3. Jika streamUrl biasa (misal Radio internet)
+    else if (track.streamUrl) {
       if (this.isYtReady && this.ytPlayer) {
         try { this.ytPlayer.stopVideo(); } catch (e) {}
       }

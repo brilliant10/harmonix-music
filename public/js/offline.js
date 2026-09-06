@@ -60,7 +60,7 @@ class OfflineManager {
       return this.downloadAndStoreTrack(track, audioBlobOrProgress);
     }
 
-    const audioBlob = audioBlobOrProgress;
+    const audioBlob = (audioBlobOrProgress instanceof Blob) ? audioBlobOrProgress : null;
     const db = await this.ensureDB();
     if (!db) throw new Error('Database offline tidak tersedia');
 
@@ -68,9 +68,12 @@ class OfflineManager {
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
 
+      const rawId = track.videoId || track.id;
+      const videoId = typeof rawId === 'string' && rawId.startsWith('yt-') ? rawId.replace('yt-', '') : String(rawId);
+
       const offlineTrack = {
         id: track.id,
-        videoId: track.videoId || null,
+        videoId: videoId || null,
         title: track.title,
         artist: track.artist,
         genre: track.genre || 'Musik',
@@ -82,7 +85,7 @@ class OfflineManager {
         size: audioBlob ? audioBlob.size : 0,
         downloadedAt: Date.now(),
         isOffline: true,
-        source: 'offline'
+        source: audioBlob ? 'local' : 'youtube'
       };
 
       const request = store.put(offlineTrack);
@@ -166,7 +169,7 @@ class OfflineManager {
     return { count: tracks.length, totalBytes, mb: `${mb} MB` };
   }
 
-  // Unduh audio track secara online untuk disimpan offline di IndexedDB
+  // Simpan lagu untuk mode perpustakaan offline di IndexedDB
   async downloadAndStoreTrack(track, onProgress = () => {}) {
     const notify = (percent, message) => {
       if (typeof onProgress === 'function') {
@@ -175,155 +178,30 @@ class OfflineManager {
       }
     };
 
-    notify(10, 'Menyiapkan berkas audio...');
+    notify(20, 'Menyiapkan berkas lagu...');
 
-    // 1. Jika track sudah memiliki audioBlob
+    // 1. Jika track sudah memiliki audioBlob (berkas lokal pengguna)
     if (track.audioBlob) {
-      notify(80, 'Menyimpan berkas lokal...');
+      notify(80, 'Menyimpan berkas lokal ke memori...');
       await this.saveTrack(track, track.audioBlob);
       notify(100, 'Berhasil disimpan offline!');
       return true;
     }
 
-    // 2. Jika lagu memiliki streamUrl (iTunes preview / radio)
-    if (track.streamUrl) {
-      try {
-        notify(40, 'Mengunduh stream audio...');
-        const res = await fetch(track.streamUrl);
-        if (res.ok) {
-          const blob = await res.blob();
-          notify(85, 'Menyimpan ke IndexedDB...');
-          await this.saveTrack(track, blob);
-          notify(100, 'Tersimpan untuk offline!');
-          return true;
-        }
-      } catch (e) {
-        console.warn('Gagal unduh direct stream:', e);
-      }
-    }
-
-    // 3. Untuk lagu online YouTube
-    notify(30, 'Mengambil stream audio asli...');
-    const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
-
-    try {
-      const blob = await this.fetchOrSynthesizeAudioBlob(track, videoId, notify);
-      notify(85, 'Menyimpan ke memori perangkat (IndexedDB)...');
-      await this.saveTrack(track, blob);
-      notify(100, 'Lagu siap diputar offline!');
-      return true;
-    } catch (err) {
-      console.error('Download offline gagal:', err);
-      throw err;
-    }
+    // 2. Jika lagu online YouTube: simpan metadata ke IndexedDB agar muncul di Perpustakaan PWA
+    notify(50, 'Menyimpan informasi lagu ke Perpustakaan PWA...');
+    await this.saveTrack(track, null);
+    notify(100, 'Lagu siap diputar di Perpustakaan PWA!');
+    return true;
   }
 
-  // Pengambilan audio dengan multi-source fallback
-  async fetchOrSynthesizeAudioBlob(track, videoId, notify = () => {}) {
-    // 1. Coba unduh via backend /api/download proxy (CORS open, binary chunks)
-    if (videoId) {
-      try {
-        notify(45, 'Mengunduh berkas audio m4a...');
-        const dlUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(track.title || 'Lagu')}`;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 25000);
-        const res = await fetch(dlUrl, { signal: controller.signal });
-        clearTimeout(timer);
-        if (res.ok) {
-          const blob = await res.blob();
-          if (blob.size > 50000) {
-            return blob;
-          }
-        }
-      } catch (e) {
-        console.warn('Download proxy fetch failed, trying stream API:', e);
-      }
-
-      // 2. Coba via /api/stream
-      try {
-        notify(55, 'Mengekstrak URL stream audio...');
-        const res = await fetch(`/api/stream?id=${videoId}&title=${encodeURIComponent(track.title || 'Lagu')}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && json.data.streamUrl) {
-            notify(70, 'Mengunduh stream langsung...');
-            const streamRes = await fetch(json.data.streamUrl);
-            if (streamRes.ok) {
-              const b = await streamRes.blob();
-              if (b.size > 50000) return b;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Stream fetch failed:', e);
-      }
-    }
-
-    // 3. Fallback cerdas: Ambil audio stream radio santai berkualitas tinggi
-    notify(65, 'Mengoptimalkan format audio offline...');
-    try {
-      const backupSample = 'https://ice1.somafm.com/groovesalad-128-mp3';
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(backupSample, { signal: controller.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const reader = res.body.getReader();
-        const chunks = [];
-        let total = 0;
-        const maxBytes = 2 * 1024 * 1024;
-        while (total < maxBytes) {
-          const { done, value } = await reader.read();
-          if (done || !value) break;
-          chunks.push(value);
-          total += value.length;
-        }
-        reader.cancel();
-        return new Blob(chunks, { type: 'audio/mp3' });
-      }
-    } catch (e) {}
-
-    // 4. Fallback jika internet sedang putus sama sekali
-    return this.createFallbackAudioBlob();
-  }
-
-  // Buat audio blob WAV sebagai cadangan jika tidak ada internet sama sekali saat men-cache
-  createFallbackAudioBlob() {
-    const sampleRate = 44100;
-    const numChannels = 2;
-    const numFrames = sampleRate * 5;
-    const buffer = new ArrayBuffer(44 + numFrames * numChannels * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset, string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numFrames * numChannels * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * numChannels * 2, true);
-    view.setUint16(32, numChannels * 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numFrames * numChannels * 2, true);
-
-    return new Blob([view], { type: 'audio/wav' });
-  }
-
-  // Unduh langsung berkas audio ke folder download pengguna di HP (iPhone/Android) / Komputer
-  downloadToDevice(track) {
-    const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
+  // Unduh langsung berkas audio ke perangkat pengguna (iPhone iOS / Android / Komputer)
+  async downloadToDevice(track, targetServer = 'ytmp3') {
+    const rawId = track.videoId || track.id;
+    const videoId = typeof rawId === 'string' && rawId.startsWith('yt-') ? rawId.replace('yt-', '') : String(rawId);
     const titleClean = (track.title || 'Lagu').replace(/[/\\?%*:|"<>]/g, '-').trim() || 'Lagu';
 
-    // 1. Jika audioBlob sudah tersimpan di IndexedDB
+    // 1. Jika audioBlob sudah tersimpan di IndexedDB (berkas lokal)
     if (track.audioBlob) {
       const ext = track.audioBlob.type && track.audioBlob.type.includes('mp4') ? 'm4a' : 'mp3';
       const url = URL.createObjectURL(track.audioBlob);
@@ -336,21 +214,33 @@ class OfflineManager {
         try { document.body.removeChild(a); } catch (e) {}
         URL.revokeObjectURL(url);
       }, 1500);
-      return;
+      return { success: true, mode: 'local' };
     }
 
-    // 2. Jika YouTube track: gunakan direct location redirection ke /api/download
-    // Endpoint ini mengembalikan Content-Disposition: attachment, sehingga Safari iOS & Chrome
-    // menampilkan sheet unduhan native tanpa memicu popup blocker browser
+    // 2. Jika lagu YouTube: Salin link YouTube otomatis ke clipboard & buka converter MP3 berkecepatan tinggi
     if (videoId) {
-      const downloadUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(titleClean)}`;
-      window.location.href = downloadUrl;
-      return;
+      const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(ytUrl);
+        }
+      } catch (e) {}
+
+      let converterUrl = 'https://ytmp3.nu/';
+      if (targetServer === 'snapsave') {
+        converterUrl = 'https://snapsave.io/';
+      } else if (targetServer === 'tomp3') {
+        converterUrl = 'https://tomp3.cc/';
+      }
+
+      window.open(converterUrl, '_blank');
+      return { success: true, mode: 'converter', ytUrl, server: converterUrl };
     }
 
     // 3. Jika track memiliki direct streamUrl
     if (track.streamUrl) {
-      window.location.href = track.streamUrl;
+      window.open(track.streamUrl, '_blank');
+      return { success: true, mode: 'stream' };
     }
   }
 }

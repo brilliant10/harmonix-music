@@ -2426,17 +2426,39 @@ window.App = {
     }
   },
 
-  async confirmDownloadFile() {
+  async confirmDownloadFile(server = 'ytmp3') {
     const track = AppState.pendingDownloadTrack;
     if (!track) return;
 
     try {
-      await OfflineStorage.downloadToDevice(track);
-      showToast(`Mengunduh file audio "${track.title}" ke penyimpanan perangkat...`, 'success');
+      const res = await OfflineStorage.downloadToDevice(track, server);
+      if (res && res.mode === 'converter') {
+        showToast(`Link lagu otomatis disalin! Silakan Paste di konverter untuk download MP3 320kbps 🎵`, 'success');
+      } else {
+        showToast(`Mengunduh berkas audio "${track.title}" ke penyimpanan perangkat...`, 'success');
+      }
       const modal = document.getElementById('track-download-modal');
       if (modal) modal.classList.add('hidden');
     } catch (err) {
       showToast('Gagal mengunduh file: ' + err.message, 'error');
+    }
+  },
+
+  async copyPendingTrackLink() {
+    const track = AppState.pendingDownloadTrack;
+    if (!track) return;
+    const rawId = track.videoId || track.id;
+    const videoId = typeof rawId === 'string' && rawId.startsWith('yt-') ? rawId.replace('yt-', '') : String(rawId);
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(ytUrl);
+        showToast(`Link lagu disalin ke clipboard! 📋`, 'success');
+      } else {
+        prompt('Salin link lagu ini:', ytUrl);
+      }
+    } catch (e) {
+      prompt('Salin link lagu ini:', ytUrl);
     }
   },
 
@@ -2670,12 +2692,12 @@ document.addEventListener('DOMContentLoaded', () => {
   setupKeyboardShortcuts();
   updateOfflineBadgeCount();
 
-  // Service Worker Registration for PWA & Offline Caching (v6 - Instant Activation)
+  // Service Worker Registration for PWA & Offline Caching (v7 - Instant Activation)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=6.0')
+      navigator.serviceWorker.register('./sw.js?v=7.0')
         .then(reg => {
-          console.log('HarmoniX Service Worker v6 terdaftar:', reg.scope);
+          console.log('HarmoniX Service Worker v7 terdaftar:', reg.scope);
           reg.update();
         })
         .catch(err => console.log('HarmoniX Service Worker gagal:', err));

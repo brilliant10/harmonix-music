@@ -1,9 +1,9 @@
 /**
- * HarmoniX Music Player - Service Worker (v6 - Instant Refresh & Network First)
+ * HarmoniX Music Player - Service Worker (v7 - Instant Refresh & Network First)
  * Mengaktifkan pembaruan instan, instalasi PWA, dan offline fallback
  */
 
-const CACHE_NAME = 'harmonix-cache-v6';
+const CACHE_NAME = 'harmonix-cache-v7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

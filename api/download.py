@@ -40,7 +40,7 @@ class handler(BaseHTTPRequestHandler):
 
         if not stream_info or not stream_info.get('streamUrl'):
             # Fallback redirect to a fast online converter if stream extraction fails
-            target_url = f"https://www.y2meta.mobi/en/youtube-to-mp3/{vid}"
+            target_url = "https://ytmp3.nu/"
             self.send_response(302)
             self.send_header('Location', target_url)
             self.end_headers()
