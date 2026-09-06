@@ -17,9 +17,14 @@ export const EQ_PRESETS = {
 
 class AudioEngine {
   constructor() {
-    // HTML5 Audio untuk file lokal, streaming radio, dan lagu offline
-    this.audio = new Audio();
-    this.audio.preload = 'metadata';
+    // HTML5 Audio untuk streaming langsung, file lokal, radio, dan offline
+    this.audio = document.createElement('audio');
+    this.audio.setAttribute('playsinline', 'true');
+    this.audio.setAttribute('webkit-playsinline', 'true');
+    this.audio.preload = 'auto';
+    this.audio.style.display = 'none';
+    if (document.body) document.body.appendChild(this.audio);
+    else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(this.audio));
 
     // State pemutar
     this.currentTrack = null;
@@ -58,7 +63,7 @@ class AudioEngine {
       networkChange: []
     };
 
-    this.isDirectAudioActive = false;
+    this.isDirectAudioActive = true;
     this.keepaliveAudio = null;
 
     this.loadSavedState();
@@ -199,9 +204,15 @@ class AudioEngine {
   initSafariBackgroundKeepalive() {
     const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
     try {
-      this.keepaliveAudio = new Audio(SILENT_WAV);
+      this.keepaliveAudio = document.createElement('audio');
+      this.keepaliveAudio.setAttribute('playsinline', 'true');
+      this.keepaliveAudio.setAttribute('webkit-playsinline', 'true');
+      this.keepaliveAudio.src = SILENT_WAV;
       this.keepaliveAudio.loop = true;
       this.keepaliveAudio.volume = 0.01;
+      this.keepaliveAudio.style.display = 'none';
+      if (document.body) document.body.appendChild(this.keepaliveAudio);
+      else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(this.keepaliveAudio));
     } catch (e) {
       console.warn('Keepalive audio init error:', e);
     }
@@ -363,12 +374,10 @@ class AudioEngine {
   }
 
   isCurrentTrackYouTube() {
-    if (this.isDirectAudioActive) return false;
-    // Lagu offline atau yang memiliki audioBlob selalu diputar via HTML5 Audio
     if (this.currentTrack && (this.currentTrack.isOffline || this.currentTrack.audioBlob || this.currentTrack.source === 'offline')) {
       return false;
     }
-    return this.currentTrack && (this.currentTrack.source === 'youtube' || !!this.currentTrack.videoId);
+    return !!(this.currentTrack && (this.currentTrack.source === 'youtube' || this.currentTrack.videoId));
   }
 
   // --- Playback Control ---
@@ -430,27 +439,60 @@ class AudioEngine {
     }
     // 2. Jika lagu online YouTube
     else if (this.isCurrentTrackYouTube()) {
-      this.audio.pause();
-      this.audio.currentTime = 0;
-
       const videoId = track.videoId || track.id.replace('yt-', '');
       this.startSafariKeepalive();
-      this.fetchDirectAudioStream(track, videoId);
 
-      if (this.isYtReady && this.ytPlayer) {
-        try {
-          this.ytPlayer.unMute();
-          this.ytPlayer.setVolume(this.volume * 100);
-          this.ytPlayer.loadVideoById(videoId);
-          this.ytPlayer.playVideo();
-          this.isPlaying = true;
-          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-          this.emit('playState', true);
-        } catch (e) {
-          console.warn('YT loadVideoById error:', e);
+      const isVideoModeActive = window.App && window.App.AppState && window.App.AppState.isVideoMode;
+
+      if (isVideoModeActive) {
+        this.audio.pause();
+        this.isDirectAudioActive = false;
+        if (this.isYtReady && this.ytPlayer) {
+          try {
+            this.ytPlayer.unMute();
+            this.ytPlayer.setVolume(this.volume * 100);
+            this.ytPlayer.loadVideoById(videoId);
+            this.ytPlayer.playVideo();
+            this.isPlaying = true;
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+            this.emit('playState', true);
+          } catch (e) {
+            console.warn('YT loadVideoById error:', e);
+          }
+        } else {
+          this.pendingYtVideoId = videoId;
         }
       } else {
-        this.pendingYtVideoId = videoId;
+        // Audio Mode (Default & Safari iOS 100% Background Audio)
+        if (this.isYtReady && this.ytPlayer) {
+          try { this.ytPlayer.stopVideo(); } catch (e) {}
+        }
+        this.isDirectAudioActive = true;
+        const streamUrl = `/api/stream?id=${videoId}&title=${encodeURIComponent(track.title || '')}&redirect=1`;
+        this.audio.src = streamUrl;
+        this.audio.volume = this.volume;
+        this.audio.muted = this.isMuted;
+        try {
+          await this.audio.play();
+          this.isPlaying = true;
+          this.startSafariKeepalive();
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+          this.emit('playState', true);
+        } catch (err) {
+          console.warn('Direct stream audio play failed, falling back to YouTube iframe:', err);
+          this.isDirectAudioActive = false;
+          if (this.isYtReady && this.ytPlayer) {
+            this.ytPlayer.unMute();
+            this.ytPlayer.setVolume(this.volume * 100);
+            this.ytPlayer.loadVideoById(videoId);
+            this.ytPlayer.playVideo();
+            this.isPlaying = true;
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+            this.emit('playState', true);
+          } else {
+            this.pendingYtVideoId = videoId;
+          }
+        }
       }
     } 
     // 3. Jika lagu lokal atau radio internet

@@ -1,9 +1,9 @@
 /**
- * HarmoniX Music Player - Service Worker
- * Mengaktifkan instalasi PWA dan offline caching untuk antarmuka aplikasi
+ * HarmoniX Music Player - Service Worker (v6 - Instant Refresh & Network First)
+ * Mengaktifkan pembaruan instan, instalasi PWA, dan offline fallback
  */
 
-const CACHE_NAME = 'harmonix-cache-v3';
+const CACHE_NAME = 'harmonix-cache-v6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -36,30 +36,38 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            console.log('HarmoniX SW: Menghapus cache lama:', key);
+            return caches.delete(key);
+          }
+        })
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-  // Hanya cache GET request untuk file statis aplikasi
+  // Jangan intercept request API atau unduhan biner
   if (event.request.method !== 'GET' || event.request.url.includes('/api/')) {
     return;
   }
 
+  // Network-First: selalu ambil versi terbaru jika online, fallback ke cache jika offline
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const resClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
+        }
         return networkResponse;
-      }).catch(() => {
-        // Fallback offline
-        return caches.match('./index.html');
-      });
-    })
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+          return caches.match('./index.html');
+        });
+      })
   );
 });

@@ -96,6 +96,14 @@ class handler(BaseHTTPRequestHandler):
         title_param = query_params.get('title', [''])[0].strip()
         result = get_audio_stream_url(vid, title_param)
 
+        redirect_param = query_params.get('redirect', ['0'])[0]
+        if redirect_param == '1' and result and result.get('streamUrl'):
+            self.send_response(302)
+            self.send_header('Location', result['streamUrl'])
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            return
+
         if result:
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')

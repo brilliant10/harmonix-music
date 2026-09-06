@@ -51,6 +51,34 @@ window.addEventListener('appinstalled', () => {
   showToast('HarmoniX Music Player berhasil dipasang di Desktop!', 'success');
 });
 
+// Centralized Track Registry for Safe Event Handlers (Fixes all quotation & syntax errors)
+window.HarmoniXTracks = new Map();
+
+function registerTrack(track) {
+  if (!track || !track.id) return track;
+  window.HarmoniXTracks.set(String(track.id), track);
+  return track;
+}
+
+function resolveTrack(trackOrId) {
+  if (!trackOrId) return null;
+  if (typeof trackOrId === 'object') {
+    if (trackOrId.id) window.HarmoniXTracks.set(String(trackOrId.id), trackOrId);
+    return trackOrId;
+  }
+  return window.HarmoniXTracks.get(String(trackOrId)) || null;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Helper: Format seconds to mm:ss
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -473,7 +501,7 @@ function renderRadioView() {
               <div class="flex items-center gap-2 text-xs text-slate-400">
                 <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Siaran Aktif
               </div>
-              <button onclick='window.App.playStation(${JSON.stringify(station).replace(/'/g, "\\'")})' class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all">
+              <button onclick="window.App.playStation('${station.id}')" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all">
                 <i data-lucide="play" class="w-4 h-4 fill-current"></i> Putar Stasiun
               </button>
             </div>
@@ -934,8 +962,10 @@ async function loadAndRenderOfflineTracks() {
 }
 
 function renderOfflineTrackRow(track, index, trackList) {
-  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
-  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
     <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-amber-500/50 bg-amber-950/20 active-track-glow' : ''}">
@@ -951,17 +981,17 @@ function renderOfflineTrackRow(track, index, trackList) {
         </div>
 
         <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
-          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${track.title}" class="w-full h-full object-cover" loading="lazy" />
-          <button onclick='window.App.playOfflineTrack(${trackJson}, ${index})' class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover" loading="lazy" />
+          <button onclick="window.App.playOfflineTrack('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
           </button>
         </div>
 
         <div class="min-w-0 flex-1">
-          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-amber-400 font-bold' : 'text-slate-100'}">${track.title}</h4>
+          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-amber-400 font-bold' : 'text-slate-100'}">${escapeHtml(track.title)}</h4>
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">Offline</span>
-            <p class="text-xs text-slate-400 truncate">${track.artist}</p>
+            <p class="text-xs text-slate-400 truncate">${escapeHtml(track.artist)}</p>
           </div>
         </div>
       </div>
@@ -969,7 +999,7 @@ function renderOfflineTrackRow(track, index, trackList) {
       <div class="flex items-center gap-3 ml-4">
         <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
         
-        <button onclick="window.App.deleteOfflineTrack('${track.id}')" title="Hapus dari penyimpanan offline" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+        <button onclick="window.App.deleteOfflineTrack('${trackId}')" title="Hapus dari penyimpanan offline" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
         </button>
       </div>
@@ -1005,14 +1035,16 @@ function renderTrackSkeletons(count = 8) {
 }
 
 function renderTrackCard(track, index, trackList) {
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
   const isLiked = Storage.isLiked(track.id);
-  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
-  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
     <div class="glass-card rounded-2xl p-3 flex flex-col justify-between group relative overflow-hidden ${isCurrentlyPlaying ? 'active-track-glow' : ''}">
       <div class="relative w-full aspect-square rounded-xl overflow-hidden mb-3 bg-slate-800">
-        <img src="${track.artwork}" alt="${track.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+        <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         
         <!-- Live Soundwave Badge if Playing -->
         ${isCurrentlyPlaying && Player.isPlaying ? `
@@ -1025,28 +1057,28 @@ function renderTrackCard(track, index, trackList) {
 
         <!-- Hover Overlay -->
         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px]">
-          <button onclick='window.App.playFromCard(${trackJson}, ${index})' class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
+          <button onclick="window.App.playFromCard('${trackId}', ${index})" class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-5 h-5 fill-current ml-0.5"></i>
           </button>
         </div>
 
-        <button onclick='event.stopPropagation(); window.App.openDownloadModal(${trackJson})' title="Download / Simpan Offline" class="absolute top-2 left-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-amber-400 transition-colors">
+        <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Simpan Offline" class="absolute top-2 left-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-amber-400 transition-colors">
           <i data-lucide="download" class="w-4 h-4"></i>
         </button>
 
-        <button onclick='window.App.toggleLike(${trackJson}, this)' class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="window.App.toggleLike('${trackId}', this)" class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
       </div>
 
       <div class="min-w-0">
-        <h4 class="text-sm font-bold text-white truncate group-hover:text-indigo-400 transition-colors" title="${track.title}">${track.title}</h4>
-        <p class="text-xs text-slate-400 truncate mt-0.5" title="${track.artist}">${track.artist}</p>
+        <h4 class="text-sm font-bold text-white truncate group-hover:text-indigo-400 transition-colors" title="${escapeHtml(track.title)}">${escapeHtml(track.title)}</h4>
+        <p class="text-xs text-slate-400 truncate mt-0.5" title="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</p>
       </div>
 
       <div class="flex items-center justify-between mt-3 pt-2 border-t border-white/5 text-[11px] text-slate-500">
         <span class="truncate max-w-[90px] font-mono">${track.durationStr || formatTime(track.duration)}</span>
-        <button onclick='window.App.openTrackMenu(${trackJson}, event)' class="p-1 rounded hover:text-slate-200 transition-colors">
+        <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-1 rounded hover:text-slate-200 transition-colors">
           <i data-lucide="more-horizontal" class="w-4 h-4"></i>
         </button>
       </div>
@@ -1055,9 +1087,11 @@ function renderTrackCard(track, index, trackList) {
 }
 
 function renderTrackRow(track, index, trackList, playlistId = null) {
+  if (!track) return '';
+  registerTrack(track);
+  const trackId = String(track.id);
   const isLiked = Storage.isLiked(track.id);
-  const trackJson = JSON.stringify(track).replace(/'/g, "&#39;");
-  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === String(track.id);
+  const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
     <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-indigo-500/50 bg-indigo-950/25 active-track-glow' : ''}">
@@ -1073,35 +1107,35 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
         </div>
 
         <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
-          <img src="${track.artwork}" alt="${track.title}" class="w-full h-full object-cover" loading="lazy" />
-          <button onclick='window.App.playFromRow(${trackJson}, ${index})' class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+          <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover" loading="lazy" />
+          <button onclick="window.App.playFromRow('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
           </button>
         </div>
 
         <div class="min-w-0 flex-1">
-          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-indigo-400 font-bold' : 'text-slate-100'}">${track.title}</h4>
-          <p class="text-xs text-slate-400 truncate">${track.artist}</p>
+          <h4 class="text-sm font-semibold truncate ${isCurrentlyPlaying ? 'text-indigo-400 font-bold' : 'text-slate-100'}">${escapeHtml(track.title)}</h4>
+          <p class="text-xs text-slate-400 truncate">${escapeHtml(track.artist)}</p>
         </div>
       </div>
 
       <div class="flex items-center gap-2 sm:gap-3 ml-4">
         <span class="text-xs text-slate-500 hidden sm:inline font-mono">${track.durationStr || formatTime(track.duration)}</span>
         
-        <button onclick='event.stopPropagation(); window.App.openDownloadModal(${trackJson})' title="Download / Simpan Offline" class="p-2 text-slate-400 hover:text-amber-400 transition-colors">
+        <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Simpan Offline" class="p-2 text-slate-400 hover:text-amber-400 transition-colors">
           <i data-lucide="download" class="w-4 h-4"></i>
         </button>
 
-        <button onclick='window.App.toggleLike(${trackJson}, this)' class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="window.App.toggleLike('${trackId}', this)" class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
 
         ${playlistId ? `
-          <button onclick="window.App.removeFromPlaylist('${playlistId}', '${track.id}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+          <button onclick="window.App.removeFromPlaylist('${playlistId}', '${trackId}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         ` : `
-          <button onclick='window.App.openTrackMenu(${trackJson}, event)' class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
+          <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
             <i data-lucide="more-vertical" class="w-4 h-4"></i>
           </button>
         `}
@@ -1373,7 +1407,6 @@ function updateQueueDrawer() {
     } else {
       queueList.innerHTML = upcoming.map((t, idx) => {
         const actualIndex = currentIndex + 1 + idx;
-        const trackJson = JSON.stringify(t).replace(/'/g, "&#39;");
         return `
           <div onclick='window.Player.playTrack(window.Player.queue[${actualIndex}])' class="flex items-center gap-3 p-2 rounded-xl glass-panel hover:bg-indigo-600/30 cursor-pointer transition-colors group">
             <span class="text-xs text-slate-500 w-4 text-center font-mono">${idx + 1}</span>
@@ -1432,19 +1465,20 @@ async function renderSimilarTracksInDrawer() {
     }
 
     container.innerHTML = similarTracks.map((t, idx) => {
-      const trackJson = JSON.stringify(t).replace(/'/g, "&#39;");
+      registerTrack(t);
+      const trackId = String(t.id);
       return `
         <div class="flex items-center gap-3 p-2 rounded-xl glass-panel hover:bg-indigo-600/30 transition-colors group">
-          <img src="${t.artwork}" alt="${t.title}" class="w-9 h-9 rounded-lg object-cover" />
-          <div class="min-w-0 flex-1 cursor-pointer" onclick='window.App.playSimilarTrackDirect(${trackJson})'>
-            <h5 class="text-xs font-semibold text-slate-200 truncate group-hover:text-white">${t.title}</h5>
-            <p class="text-[10px] text-slate-400 truncate">${t.artist}</p>
+          <img src="${t.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(t.title)}" class="w-9 h-9 rounded-lg object-cover" />
+          <div class="min-w-0 flex-1 cursor-pointer" onclick="window.App.playSimilarTrackDirect('${trackId}')">
+            <h5 class="text-xs font-semibold text-slate-200 truncate group-hover:text-white">${escapeHtml(t.title)}</h5>
+            <p class="text-[10px] text-slate-400 truncate">${escapeHtml(t.artist)}</p>
           </div>
           <div class="flex items-center gap-1">
-            <button onclick='window.App.addSimilarTrackToQueue(${trackJson})' title="Tambah ke antrean" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+            <button onclick="window.App.addSimilarTrackToQueue('${trackId}')" title="Tambah ke antrean" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
               <i data-lucide="list-plus" class="w-3.5 h-3.5"></i>
             </button>
-            <button onclick='window.App.openDownloadModal(${trackJson})' title="Download / Offline" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-white/10 transition-colors">
+            <button onclick="event.stopPropagation(); window.App.openDownloadModal('${trackId}')" title="Download / Offline" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-white/10 transition-colors">
               <i data-lucide="download" class="w-3.5 h-3.5"></i>
             </button>
           </div>
@@ -1751,26 +1785,34 @@ function openMobileSidebar() {
 
 // Global App API
 window.App = {
+  AppState,
   switchView,
-  playSingle(track) {
-    Player.playTrack(track);
+  playSingle(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (track) Player.playTrack(track);
   },
-  playFromCard(track, index) {
+  playFromCard(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
       Player.playTrack(track, AppState.currentTrackList);
     }
   },
-  playFromRow(track, index) {
+  playFromRow(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
       Player.playTrack(track, AppState.currentTrackList);
     }
   },
-  playStation(station) {
-    Player.playTrack(station);
+  playStation(stationOrId) {
+    let station = typeof stationOrId === 'object' ? stationOrId : RADIO_STATIONS.find(s => s.id === stationOrId);
+    if (!station) station = resolveTrack(stationOrId);
+    if (station) Player.playTrack(station);
   },
   playAllFavorites() {
     const liked = Storage.getLikedSongs();
@@ -1791,7 +1833,9 @@ window.App = {
       Player.playTrack(pl.tracks[0], pl.tracks);
     }
   },
-  toggleLike(track, el) {
+  toggleLike(trackOrId, el) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     const isNowLiked = Storage.toggleLike(track);
     showToast(isNowLiked ? 'Ditambahkan ke favorit!' : 'Dihapus dari favorit');
 
@@ -1841,21 +1885,23 @@ window.App = {
     showToast('Lagu dihapus dari playlist');
     renderPlaylistsView(plId);
   },
-  openTrackMenu(track, event) {
-    event.stopPropagation();
+  openTrackMenu(trackOrId, event) {
+    if (event) event.stopPropagation();
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     AppState.activeTrackMenu = track;
     const playlists = Storage.getPlaylists();
     const menu = document.getElementById('track-action-menu');
 
     document.getElementById('track-menu-playlists').innerHTML = playlists.map(pl => `
       <button onclick="window.App.addTrackToPlaylist('${pl.id}')" class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-indigo-600 hover:text-white transition-colors truncate">
-        + ${pl.name}
+        + ${escapeHtml(pl.name)}
       </button>
     `).join('');
 
     menu.classList.remove('hidden');
-    menu.style.top = `${Math.min(window.innerHeight - 200, event.clientY + 10)}px`;
-    menu.style.left = `${Math.min(window.innerWidth - 220, event.clientX - 100)}px`;
+    menu.style.top = `${Math.min(window.innerHeight - 200, (event ? event.clientY : 100) + 10)}px`;
+    menu.style.left = `${Math.min(window.innerWidth - 220, (event ? event.clientX : 100) - 100)}px`;
   },
   addTrackToPlaylist(playlistId) {
     if (AppState.activeTrackMenu) {
@@ -1884,12 +1930,37 @@ window.App = {
         if (recordContainer) recordContainer.classList.add('hidden');
         if (btn) btn.classList.add('text-indigo-400');
         showToast('Mode Video Klip Aktif');
+        if (Player.currentTrack && Player.isDirectAudioActive) {
+          const curTime = Player.audio.currentTime || 0;
+          Player.audio.pause();
+          Player.isDirectAudioActive = false;
+          const videoId = Player.currentTrack.videoId || (Player.currentTrack.id && Player.currentTrack.id.startsWith('yt-') ? Player.currentTrack.id.replace('yt-', '') : null);
+          if (videoId && Player.ytPlayer && Player.isYtReady) {
+            try {
+              Player.ytPlayer.loadVideoById(videoId, curTime);
+              if (Player.isPlaying) Player.ytPlayer.playVideo();
+            } catch (e) {}
+          }
+        }
       } else {
         videoContainer.classList.remove('visible-player');
         videoContainer.classList.add('invisible-player');
         if (recordContainer) recordContainer.classList.remove('hidden');
         if (btn) btn.classList.remove('text-indigo-400');
-        showToast('Mode Piringan Hitam (Vinyl) Aktif');
+        showToast('Mode Audio & Background Aktif');
+        if (Player.currentTrack && !Player.isDirectAudioActive) {
+          const curTime = (Player.ytPlayer && Player.isYtReady) ? Player.ytPlayer.getCurrentTime() : 0;
+          if (Player.ytPlayer && Player.isYtReady) {
+            try { Player.ytPlayer.pauseVideo(); } catch (e) {}
+          }
+          Player.isDirectAudioActive = true;
+          const videoId = Player.currentTrack.videoId || (Player.currentTrack.id && Player.currentTrack.id.startsWith('yt-') ? Player.currentTrack.id.replace('yt-', '') : null);
+          if (videoId) {
+            Player.audio.src = `/api/stream?id=${videoId}&title=${encodeURIComponent(Player.currentTrack.title || '')}&redirect=1`;
+            Player.audio.currentTime = curTime;
+            if (Player.isPlaying) Player.audio.play().catch(() => {});
+          }
+        }
       }
     }
   },
@@ -2246,19 +2317,24 @@ window.App = {
     showToast('Rekomendasi berhasil diperbarui!', 'success');
   },
 
-  playSimilarTrackDirect(track) {
+  playSimilarTrackDirect(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     Player.playTrack(track);
     showToast(`Memutar: ${track.title}`, 'success');
   },
 
-  addSimilarTrackToQueue(track) {
+  addSimilarTrackToQueue(trackOrId) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     Player.addToQueue(track);
     showToast(`Ditambahkan ke antrean: ${track.title}`, 'info');
     updateQueueDrawer();
   },
 
   // Offline & Download Management
-  async openDownloadModal(track) {
+  async openDownloadModal(trackOrId) {
+    let track = resolveTrack(trackOrId);
     if (!track) {
       if (Player.currentTrack) track = Player.currentTrack;
       else {
@@ -2376,7 +2452,9 @@ window.App = {
     }
   },
 
-  playOfflineTrack(track, index) {
+  playOfflineTrack(trackOrId, index) {
+    const track = resolveTrack(trackOrId);
+    if (!track) return;
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
@@ -2592,11 +2670,14 @@ document.addEventListener('DOMContentLoaded', () => {
   setupKeyboardShortcuts();
   updateOfflineBadgeCount();
 
-  // Service Worker Registration for PWA & Offline Caching
+  // Service Worker Registration for PWA & Offline Caching (v6 - Instant Activation)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(reg => console.log('HarmoniX Service Worker terdaftar:', reg.scope))
+      navigator.serviceWorker.register('./sw.js?v=6.0')
+        .then(reg => {
+          console.log('HarmoniX Service Worker v6 terdaftar:', reg.scope);
+          reg.update();
+        })
         .catch(err => console.log('HarmoniX Service Worker gagal:', err));
     });
   }

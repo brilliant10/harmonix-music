@@ -226,7 +226,7 @@ class OfflineManager {
         notify(45, 'Mengunduh berkas audio m4a...');
         const dlUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(track.title || 'Lagu')}`;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 12000);
+        const timer = setTimeout(() => controller.abort(), 25000);
         const res = await fetch(dlUrl, { signal: controller.signal });
         clearTimeout(timer);
         if (res.ok) {
@@ -242,7 +242,7 @@ class OfflineManager {
       // 2. Coba via /api/stream
       try {
         notify(55, 'Mengekstrak URL stream audio...');
-        const res = await fetch(`/api/stream?id=${videoId}`);
+        const res = await fetch(`/api/stream?id=${videoId}&title=${encodeURIComponent(track.title || 'Lagu')}`);
         if (res.ok) {
           const json = await res.json();
           if (json.data && json.data.streamUrl) {
@@ -318,7 +318,7 @@ class OfflineManager {
     return new Blob([view], { type: 'audio/wav' });
   }
 
-  // Unduh langsung berkas audio ke folder download pengguna di HP / Komputer
+  // Unduh langsung berkas audio ke folder download pengguna di HP (iPhone/Android) / Komputer
   downloadToDevice(track) {
     const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
     const titleClean = (track.title || 'Lagu').replace(/[/\\?%*:|"<>]/g, '-').trim() || 'Lagu';
@@ -333,38 +333,24 @@ class OfflineManager {
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
-        document.body.removeChild(a);
+        try { document.body.removeChild(a); } catch (e) {}
         URL.revokeObjectURL(url);
-      }, 1000);
+      }, 1500);
       return;
     }
 
-    // 2. Jika YouTube track, unduh langsung berkas biner audio lewat endpoint serverless
+    // 2. Jika YouTube track: gunakan direct location redirection ke /api/download
+    // Endpoint ini mengembalikan Content-Disposition: attachment, sehingga Safari iOS & Chrome
+    // menampilkan sheet unduhan native tanpa memicu popup blocker browser
     if (videoId) {
       const downloadUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(titleClean)}`;
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = `${titleClean}.m4a`;
-      a.target = '_blank';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 1000);
+      window.location.href = downloadUrl;
       return;
     }
 
     // 3. Jika track memiliki direct streamUrl
     if (track.streamUrl) {
-      const a = document.createElement('a');
-      a.href = track.streamUrl;
-      a.download = `${titleClean}.mp3`;
-      a.target = '_blank';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 1000);
+      window.location.href = track.streamUrl;
     }
   }
 }
