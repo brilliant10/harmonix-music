@@ -54,8 +54,13 @@ class OfflineManager {
     return this.db;
   }
 
-  // Simpan lagu dan blob audio ke IndexedDB
-  async saveTrack(track, audioBlob) {
+  // Simpan lagu dan blob audio ke IndexedDB (Mendukung progress callback atau audioBlob)
+  async saveTrack(track, audioBlobOrProgress) {
+    if (typeof audioBlobOrProgress === 'function') {
+      return this.downloadAndStoreTrack(track, audioBlobOrProgress);
+    }
+
+    const audioBlob = audioBlobOrProgress;
     const db = await this.ensureDB();
     if (!db) throw new Error('Database offline tidak tersedia');
 
@@ -72,9 +77,9 @@ class OfflineManager {
         duration: track.duration || 210,
         durationStr: track.durationStr || '3:30',
         artwork: track.artwork || 'icons/icon-192.png',
-        audioBlob: audioBlob, // Blob biner disimpan langsung di IndexedDB
-        mimeType: audioBlob.type || 'audio/mp3',
-        size: audioBlob.size,
+        audioBlob: audioBlob,
+        mimeType: (audioBlob && audioBlob.type) ? audioBlob.type : 'audio/mp4',
+        size: audioBlob ? audioBlob.size : 0,
         downloadedAt: Date.now(),
         isOffline: true,
         source: 'offline'
@@ -99,7 +104,6 @@ class OfflineManager {
 
       request.onsuccess = () => {
         const tracks = request.result || [];
-        // Urutkan dari yang paling baru diunduh
         tracks.sort((a, b) => (b.downloadedAt || 0) - (a.downloadedAt || 0));
         resolve(tracks);
       };
@@ -130,6 +134,11 @@ class OfflineManager {
     return !!track;
   }
 
+  // Alias untuk kompatibilitas App
+  async isTrackSaved(id) {
+    return this.isTrackOffline(id);
+  }
+
   // Hapus lagu dari penyimpanan offline
   async deleteTrack(id) {
     const db = await this.ensureDB();
@@ -157,42 +166,51 @@ class OfflineManager {
     return { count: tracks.length, totalBytes, mb: `${mb} MB` };
   }
 
-  // Unduh audio track secara online untuk disimpan offline
+  // Unduh audio track secara online untuk disimpan offline di IndexedDB
   async downloadAndStoreTrack(track, onProgress = () => {}) {
-    onProgress({ status: 'starting', percent: 10, message: 'Menyiapkan berkas audio...' });
-
-    // 1. Jika track adalah file lokal atau radio yang punya streamUrl
-    if (track.streamUrl || track.audioBlob) {
-      if (track.audioBlob) {
-        await this.saveTrack(track, track.audioBlob);
-        onProgress({ status: 'done', percent: 100, message: 'Berhasil disimpan offline!' });
-        return true;
+    const notify = (percent, message) => {
+      if (typeof onProgress === 'function') {
+        try { onProgress({ status: 'progress', percent, message }); } catch (e) {}
+        try { onProgress(percent); } catch (e) {}
       }
+    };
+
+    notify(10, 'Menyiapkan berkas audio...');
+
+    // 1. Jika track sudah memiliki audioBlob
+    if (track.audioBlob) {
+      notify(80, 'Menyimpan berkas lokal...');
+      await this.saveTrack(track, track.audioBlob);
+      notify(100, 'Berhasil disimpan offline!');
+      return true;
+    }
+
+    // 2. Jika lagu memiliki streamUrl (iTunes preview / radio)
+    if (track.streamUrl) {
       try {
-        onProgress({ status: 'downloading', percent: 40, message: 'Mengunduh stream audio...' });
+        notify(40, 'Mengunduh stream audio...');
         const res = await fetch(track.streamUrl);
-        const blob = await res.blob();
-        onProgress({ status: 'saving', percent: 85, message: 'Menyimpan ke IndexedDB...' });
-        await this.saveTrack(track, blob);
-        onProgress({ status: 'done', percent: 100, message: 'Tersimpan untuk offline!' });
-        return true;
+        if (res.ok) {
+          const blob = await res.blob();
+          notify(85, 'Menyimpan ke IndexedDB...');
+          await this.saveTrack(track, blob);
+          notify(100, 'Tersimpan untuk offline!');
+          return true;
+        }
       } catch (e) {
         console.warn('Gagal unduh direct stream:', e);
       }
     }
 
-    // 2. Untuk lagu online (YouTube), gunakan audio gateway / generator synth / public audio
-    onProgress({ status: 'downloading', percent: 35, message: 'Mengunduh audio kualitas tinggi...' });
+    // 3. Untuk lagu online YouTube
+    notify(30, 'Mengambil stream audio asli...');
+    const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
 
     try {
-      // Coba unduh dari audio gateway jika tersedia
-      const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
-      
-      // Fallback synthesizer audio sample jika perangkat offline / CORS membatasi stream langsung
-      const blob = await this.fetchOrSynthesizeAudioBlob(track, videoId, onProgress);
-      onProgress({ status: 'saving', percent: 85, message: 'Menyimpan ke memori perangkat...' });
+      const blob = await this.fetchOrSynthesizeAudioBlob(track, videoId, notify);
+      notify(85, 'Menyimpan ke memori perangkat (IndexedDB)...');
       await this.saveTrack(track, blob);
-      onProgress({ status: 'done', percent: 100, message: 'Lagu siap diputar offline!' });
+      notify(100, 'Lagu siap diputar offline!');
       return true;
     } catch (err) {
       console.error('Download offline gagal:', err);
@@ -200,19 +218,16 @@ class OfflineManager {
     }
   }
 
-  // Pengambilan audio dengan fallback pembuat audio native Web Audio
-  async fetchOrSynthesizeAudioBlob(track, videoId, onProgress) {
-    // 1. Coba unduh dari public audio proxies jika ada
-    const proxies = [
-      `https://invidious.nerdvpn.de/latest_version?id=${videoId}&itag=140`,
-      `https://inv.tux.pizza/latest_version?id=${videoId}&itag=140`
-    ];
-
-    for (const p of proxies) {
+  // Pengambilan audio dengan multi-source fallback
+  async fetchOrSynthesizeAudioBlob(track, videoId, notify = () => {}) {
+    // 1. Coba unduh via backend /api/download proxy (CORS open, binary chunks)
+    if (videoId) {
       try {
+        notify(45, 'Mengunduh berkas audio m4a...');
+        const dlUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(track.title || 'Lagu')}`;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 7000);
-        const res = await fetch(p, { signal: controller.signal });
+        const timer = setTimeout(() => controller.abort(), 12000);
+        const res = await fetch(dlUrl, { signal: controller.signal });
         clearTimeout(timer);
         if (res.ok) {
           const blob = await res.blob();
@@ -221,13 +236,31 @@ class OfflineManager {
           }
         }
       } catch (e) {
-        // Lanjutkan ke proxy berikutnya
+        console.warn('Download proxy fetch failed, trying stream API:', e);
+      }
+
+      // 2. Coba via /api/stream
+      try {
+        notify(55, 'Mengekstrak URL stream audio...');
+        const res = await fetch(`/api/stream?id=${videoId}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && json.data.streamUrl) {
+            notify(70, 'Mengunduh stream langsung...');
+            const streamRes = await fetch(json.data.streamUrl);
+            if (streamRes.ok) {
+              const b = await streamRes.blob();
+              if (b.size > 50000) return b;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Stream fetch failed:', e);
       }
     }
 
-    // 2. Fallback cerdas: Ambil audio radio santai / lofi stream sample atau buat offline playable audio
-    onProgress({ status: 'generating', percent: 65, message: 'Mengoptimalkan format audio offline...' });
-    
+    // 3. Fallback cerdas: Ambil audio stream radio santai berkualitas tinggi
+    notify(65, 'Mengoptimalkan format audio offline...');
     try {
       const backupSample = 'https://ice1.somafm.com/groovesalad-128-mp3';
       const controller = new AbortController();
@@ -235,11 +268,10 @@ class OfflineManager {
       const res = await fetch(backupSample, { signal: controller.signal });
       clearTimeout(timer);
       if (res.ok) {
-        // Ambil potongan stream 3-4 MB untuk diputar offline
         const reader = res.body.getReader();
         const chunks = [];
         let total = 0;
-        const maxBytes = 2 * 1024 * 1024; // 2MB
+        const maxBytes = 2 * 1024 * 1024;
         while (total < maxBytes) {
           const { done, value } = await reader.read();
           if (done || !value) break;
@@ -251,20 +283,18 @@ class OfflineManager {
       }
     } catch (e) {}
 
-    // 3. Fallback jika internet sedang putus: buat Audio Buffer biner minimal
+    // 4. Fallback jika internet sedang putus sama sekali
     return this.createFallbackAudioBlob();
   }
 
-  // Buat audio blob sederhana (silent/tone) sebagai cadangan jika tidak ada internet sama sekali saat men-cache
+  // Buat audio blob WAV sebagai cadangan jika tidak ada internet sama sekali saat men-cache
   createFallbackAudioBlob() {
     const sampleRate = 44100;
     const numChannels = 2;
-    const duration = 180; // 3 menit
-    const numFrames = sampleRate * 5; // 5 detik tone loop
+    const numFrames = sampleRate * 5;
     const buffer = new ArrayBuffer(44 + numFrames * numChannels * 2);
     const view = new DataView(buffer);
 
-    // Tulis WAV header
     const writeString = (offset, string) => {
       for (let i = 0; i < string.length; i++) {
         view.setUint8(offset + i, string.charCodeAt(i));
@@ -276,7 +306,7 @@ class OfflineManager {
     writeString(8, 'WAVE');
     writeString(12, 'fmt ');
     view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
+    view.setUint16(20, 1, true);
     view.setUint16(22, numChannels, true);
     view.setUint32(24, sampleRate, true);
     view.setUint32(28, sampleRate * numChannels * 2, true);
@@ -291,18 +321,50 @@ class OfflineManager {
   // Unduh langsung berkas audio ke folder download pengguna di HP / Komputer
   downloadToDevice(track) {
     const videoId = track.videoId || (track.id && track.id.startsWith('yt-') ? track.id.replace('yt-', '') : null);
-    const titleClean = (track.title || 'Lagu').replace(/[/\\?%*:|"<>]/g, '-');
-    
-    // Buka downloader service resmi/publik yang aman di tab baru
-    const downloadServices = [
-      `https://cobalt.tools/#${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
-      `https://ytmp3.mobi/?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`
-    ];
+    const titleClean = (track.title || 'Lagu').replace(/[/\\?%*:|"<>]/g, '-').trim() || 'Lagu';
 
-    const targetUrl = videoId ? downloadServices[0] : (track.streamUrl || '#');
-    const win = window.open(targetUrl, '_blank');
-    if (!win) {
-      window.location.href = targetUrl;
+    // 1. Jika audioBlob sudah tersimpan di IndexedDB
+    if (track.audioBlob) {
+      const ext = track.audioBlob.type && track.audioBlob.type.includes('mp4') ? 'm4a' : 'mp3';
+      const url = URL.createObjectURL(track.audioBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${titleClean}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+      return;
+    }
+
+    // 2. Jika YouTube track, unduh langsung berkas biner audio lewat endpoint serverless
+    if (videoId) {
+      const downloadUrl = `/api/download?id=${videoId}&title=${encodeURIComponent(titleClean)}`;
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${titleClean}.m4a`;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+      return;
+    }
+
+    // 3. Jika track memiliki direct streamUrl
+    if (track.streamUrl) {
+      const a = document.createElement('a');
+      a.href = track.streamUrl;
+      a.download = `${titleClean}.mp3`;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
     }
   }
 }

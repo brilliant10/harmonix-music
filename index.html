@@ -189,19 +189,30 @@
             <i data-lucide="menu" class="w-5 h-5"></i>
           </button>
 
-          <!-- Search Bar with Autocomplete -->
+          <!-- Search Bar with Autocomplete & Mobile Form -->
           <div class="relative flex-1">
-            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-            <input 
-              id="global-search-input" 
-              type="text" 
-              autocomplete="off"
-              placeholder="Cari jutaan lagu YouTube, artis, atau tempel link..." 
-              class="w-full pl-11 pr-12 py-2.5 rounded-2xl bg-slate-900/85 border border-white/10 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
-            />
-            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 hidden sm:inline-block">
-              /
-            </div>
+            <form id="global-search-form" action="javascript:void(0);" class="relative flex items-center w-full">
+              <button type="submit" aria-label="Cari Lagu" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-400 p-1 rounded-lg transition-colors z-10">
+                <i data-lucide="search" class="w-4 h-4"></i>
+              </button>
+              <input 
+                id="global-search-input" 
+                type="search" 
+                enterkeyhint="search"
+                autocomplete="off"
+                placeholder="Cari jutaan lagu YouTube, artis, atau tempel link..." 
+                class="w-full pl-11 pr-20 py-2.5 rounded-2xl bg-slate-900/85 border border-white/10 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/80 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
+              />
+              <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10">
+                <button type="button" id="global-search-clear" title="Hapus teks" class="hidden p-1 rounded-full text-slate-400 hover:text-white bg-slate-800/80 transition-colors">
+                  <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                </button>
+                <button type="submit" class="px-2.5 py-1 rounded-xl bg-indigo-600/80 hover:bg-indigo-500 text-[11px] font-bold text-white transition-colors hidden sm:inline-flex items-center gap-1">
+                  <span>Cari</span>
+                </button>
+                <span class="text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 hidden md:inline-block">/</span>
+              </div>
+            </form>
             
             <!-- Live Autocomplete Dropdown -->
             <div id="search-suggestions-box" class="absolute left-0 right-0 top-full mt-2 glass-modal rounded-2xl p-2 shadow-2xl border border-white/10 hidden z-50 space-y-1 max-h-64 overflow-y-auto">
@@ -228,6 +239,13 @@
           <button id="btn-open-mobile" onclick="window.App.openMobileModal()" title="Buka / Pasang di iPhone & Android" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl glass-panel hover:border-emerald-500/50 text-slate-300 hover:text-emerald-400 text-xs font-semibold transition-all">
             <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i>
             <span class="hidden md:inline">iPhone & Android</span>
+          </button>
+
+          <!-- Safari Background Audio Status Button -->
+          <button id="btn-safari-bg" onclick="window.App.openSafariBackgroundModal()" title="Fitur Background Audio Safari iOS (Aktif)" class="hidden xl:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-xs font-semibold transition-all">
+            <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+            <i data-lucide="apple" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Background Safari</span>
           </button>
 
           <!-- Quick YouTube Link Button -->
@@ -975,6 +993,52 @@
     <div class="pt-2 mt-2 border-t border-white/5">
       <button onclick="window.App.downloadCurrentMenuTrack()" class="w-full text-left px-3 py-2 text-xs rounded-lg text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors flex items-center gap-2">
         <i data-lucide="download" class="w-3.5 h-3.5"></i> Unduh File Audio
+      </button>
+    </div>
+  </div>
+
+  <!-- 10. Modal: Safari Background Audio Guide -->
+  <div id="safari-bg-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 hidden animate-fadeIn">
+    <div class="relative w-full max-w-md glass-modal rounded-3xl p-6 md:p-8 space-y-6 border border-white/10 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-600/30 flex items-center justify-center text-indigo-400 border border-indigo-500/30">
+            <i data-lucide="headphones" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-white">Background Audio Safari</h3>
+            <span class="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Sistem Aktif Otomatis 🍎
+            </span>
+          </div>
+        </div>
+        <button onclick="document.getElementById('safari-bg-modal').classList.add('hidden')" class="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs md:text-sm text-slate-300 leading-relaxed">
+        <p>HarmoniX kini dilengkapi <strong class="text-white">MediaSession & Audio Keepalive Bridge</strong> yang dirancang khusus untuk iOS Safari di iPhone & iPad:</p>
+        
+        <div class="space-y-2.5">
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="lock" class="w-4 h-4 text-indigo-400 shrink-0 mt-0.5"></i>
+            <span><strong>Layar Terkunci (Lock Screen):</strong> Musik tetap berputar saat HP dikunci dengan tampilan cover lagu & judul lagu.</span>
+          </div>
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="layout" class="w-4 h-4 text-purple-400 shrink-0 mt-0.5"></i>
+            <span><strong>Pindah Aplikasi / Dynamic Island:</strong> Buka WhatsApp, Instagram, atau game lain tanpa memutus alunan lagu.</span>
+          </div>
+          <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <i data-lucide="sliders" class="w-4 h-4 text-cyan-400 shrink-0 mt-0.5"></i>
+            <span><strong>Control Center & AirPods:</strong> Kontrol Play, Pause, Next, Prev, dan seekbar langsung dari headphone atau Control Center iOS.</span>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="document.getElementById('safari-bg-modal').classList.add('hidden')" class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg glow-primary transition-all">
+        Mengerti, Lanjutkan Mendengarkan
       </button>
     </div>
   </div>

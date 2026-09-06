@@ -5,6 +5,13 @@ import mimetypes
 import json
 import os
 import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from stream import get_audio_stream_url
+except Exception:
+    get_audio_stream_url = None
 
 SEARCH_CACHE = {}
 
@@ -72,43 +79,113 @@ def fetch_single_video_oembed(video_id):
             'isLocal': False
         }]
 
-def search_invidious_fallback(query):
-    instances = [
-        'https://inv.tux.pizza',
-        'https://invidious.nerdvpn.de',
-        'https://vid.puffyan.us'
-    ]
-    for inst in instances:
-        try:
-            url = f"{inst}/api/v1/search?q={urllib.parse.quote(query)}&type=video"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            with urllib.request.urlopen(req, timeout=4) as res:
-                items = json.loads(res.read().decode('utf-8'))
-                if isinstance(items, list) and items:
-                    results = []
-                    for item in items[:25]:
-                        vid = item.get('videoId')
-                        if vid:
-                            dur = item.get('lengthSeconds', 210)
-                            m, s = divmod(dur, 60)
+def search_innertube(query, limit=30):
+    url = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
+    payload = {
+        "context": {
+            "client": {
+                "clientName": "WEB",
+                "clientVersion": "2.20240101.00.00",
+                "hl": "id",
+                "gl": "ID"
+            }
+        },
+        "query": query
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    results = []
+    seen_ids = set()
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=7) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        def walk(node):
+            if len(results) >= limit:
+                return
+            if isinstance(node, dict):
+                if "videoRenderer" in node:
+                    vr = node["videoRenderer"]
+                    vid = vr.get("videoId")
+                    if vid and vid not in seen_ids:
+                        seen_ids.add(vid)
+                        title_runs = vr.get("title", {}).get("runs", [])
+                        title = title_runs[0]["text"] if title_runs else "Unknown Title"
+                        owner_runs = vr.get("ownerText", {}).get("runs", [])
+                        artist = owner_runs[0]["text"] if owner_runs else "Artis"
+                        dur_str = vr.get("lengthText", {}).get("simpleText", "3:30")
+
+                        dur_secs = 0
+                        parts = dur_str.split(":")
+                        if len(parts) == 2:
+                            dur_secs = int(parts[0]) * 60 + int(parts[1])
+                        elif len(parts) == 3:
+                            dur_secs = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+
+                        if dur_secs <= 7200:
                             results.append({
-                                'id': 'yt-' + vid,
-                                'videoId': vid,
-                                'title': item.get('title', 'Track'),
-                                'artist': item.get('author', 'Artis YouTube'),
-                                'duration': dur,
-                                'durationStr': f"{m}:{s:02d}",
-                                'artwork': f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                                'genre': 'YouTube Music',
-                                'source': 'youtube',
-                                'isRadio': False,
-                                'isLocal': False
+                                "id": "yt-" + vid,
+                                "videoId": vid,
+                                "title": title,
+                                "artist": artist,
+                                "duration": dur_secs,
+                                "durationStr": dur_str,
+                                "artwork": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                                "genre": "YouTube Music",
+                                "source": "youtube",
+                                "isRadio": False,
+                                "isLocal": False
                             })
-                    if results:
-                        return results
-        except Exception:
-            continue
-    return []
+                else:
+                    for v in node.values():
+                        walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(data)
+    except Exception as e:
+        print("Innertube search error:", e)
+
+    return results
+
+def search_itunes_fallback(query, limit=25):
+    try:
+        url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit={limit}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("results", [])
+            results = []
+            for item in items:
+                track_name = item.get("trackName", "Track")
+                artist_name = item.get("artistName", "Artis")
+                dur_ms = item.get("trackTimeMillis", 210000)
+                dur_sec = int(dur_ms / 1000)
+                m, s = divmod(dur_sec, 60)
+                art = item.get("artworkUrl100", "").replace("100x100bb", "500x500bb")
+                results.append({
+                    "id": f"itunes-{item.get('trackId')}",
+                    "videoId": None,
+                    "title": track_name,
+                    "artist": artist_name,
+                    "duration": dur_sec,
+                    "durationStr": f"{m}:{s:02d}",
+                    "artwork": art or "icons/icon-192.png",
+                    "genre": item.get("primaryGenreName", "Music"),
+                    "streamUrl": item.get("previewUrl", ""),
+                    "source": "itunes",
+                    "isRadio": False,
+                    "isLocal": False
+                })
+            return results
+    except Exception as e:
+        print("iTunes search fallback error:", e)
+        return []
 
 def search_youtube(query, limit=30, page=1):
     if not query or not query.strip():
@@ -126,74 +203,46 @@ def search_youtube(query, limit=30, page=1):
     if page > 1:
         search_term = f"{query} lagu ke-{page}"
 
-    url = 'https://www.youtube.com/results?search_query=' + urllib.parse.quote(search_term)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
-    }
+    # 1. Primary: YouTube Innertube API (Highly accurate, resilient, never blocked by consent)
+    results = search_innertube(search_term, limit=limit)
 
-    results = []
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as res:
-            html = res.read().decode('utf-8', errors='ignore')
-
-        m = re.search(r'var ytInitialData = ({.*?});</script>', html)
-        if m:
-            data = json.loads(m.group(1))
-            seen_ids = set()
-
-            def extract_renderers(node):
-                if len(results) >= limit:
-                    return
-
-                if isinstance(node, dict):
-                    if 'videoRenderer' in node:
-                        vr = node['videoRenderer']
-                        vid = vr.get('videoId')
-                        if vid and vid not in seen_ids:
-                            seen_ids.add(vid)
-                            title_runs = vr.get('title', {}).get('runs', [])
-                            title = title_runs[0]['text'] if title_runs else 'Unknown Title'
-                            owner_runs = vr.get('ownerText', {}).get('runs', [])
-                            artist = owner_runs[0]['text'] if owner_runs else 'Artis'
-                            dur_str = vr.get('lengthText', {}).get('simpleText', '3:30')
-
-                            dur_secs = 0
-                            parts = dur_str.split(':')
-                            if len(parts) == 2:
-                                dur_secs = int(parts[0]) * 60 + int(parts[1])
-                            elif len(parts) == 3:
-                                dur_secs = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-
-                            if dur_secs <= 7200:
-                                thumb = f'https://i.ytimg.com/vi/{vid}/hqdefault.jpg'
-                                results.append({
-                                    'id': 'yt-' + vid,
-                                    'videoId': vid,
-                                    'title': title,
-                                    'artist': artist,
-                                    'duration': dur_secs,
-                                    'durationStr': dur_str,
-                                    'artwork': thumb,
-                                    'genre': 'YouTube Music',
-                                    'source': 'youtube',
-                                    'isRadio': False,
-                                    'isLocal': False
-                                })
-                    else:
-                        for v in node.values():
-                            extract_renderers(v)
-                elif isinstance(node, list):
-                    for item in node:
-                        extract_renderers(item)
-
-            extract_renderers(data)
-    except Exception:
-        pass
-
+    # 2. Secondary Fallback: iTunes Search API
     if not results:
-        results = search_invidious_fallback(search_term)
+        results = search_itunes_fallback(search_term, limit=limit)
+
+    # 3. Tertiary Fallback: HTML Scrape
+    if not results:
+        try:
+            url = 'https://www.youtube.com/results?search_query=' + urllib.parse.quote(search_term)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+            }
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=6) as res:
+                html = res.read().decode('utf-8', errors='ignore')
+            vids = re.findall(r'/watch\?v=([0-9A-Za-z_-]{11})', html)
+            seen = set()
+            for vid in vids:
+                if vid not in seen:
+                    seen.add(vid)
+                    results.append({
+                        'id': 'yt-' + vid,
+                        'videoId': vid,
+                        'title': f'{search_term} (YouTube)',
+                        'artist': 'YouTube Music',
+                        'duration': 210,
+                        'durationStr': '3:30',
+                        'artwork': f'https://i.ytimg.com/vi/{vid}/hqdefault.jpg',
+                        'genre': 'YouTube Music',
+                        'source': 'youtube',
+                        'isRadio': False,
+                        'isLocal': False
+                    })
+                    if len(results) >= limit:
+                        break
+        except Exception:
+            pass
 
     if results:
         SEARCH_CACHE[cache_key] = results
@@ -300,7 +349,93 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'not_found', 'message': 'Lirik tidak ditemukan'}).encode('utf-8'))
             return
 
-        # 5. API Network Info / Health check
+        # 5. API Stream Audio URL
+        if '/stream' in path or '/stream' in req_path or action == 'stream':
+            vid = query_params.get('id', [''])[0].strip()
+            if vid.startswith('yt-'):
+                vid = vid[3:]
+            if not vid:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'error', 'message': 'Missing id parameter'}).encode('utf-8'))
+                return
+
+            stream_info = None
+            if get_audio_stream_url:
+                stream_info = get_audio_stream_url(vid)
+
+            if stream_info:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'success', 'data': stream_info}).encode('utf-8'))
+            else:
+                self.send_response(404)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'error', 'message': 'Stream audio tidak ditemukan'}).encode('utf-8'))
+            return
+
+        # 6. API Download Audio File
+        if '/download' in path or '/download' in req_path or action == 'download':
+            vid = query_params.get('id', [''])[0].strip()
+            if vid.startswith('yt-'):
+                vid = vid[3:]
+            title_param = query_params.get('title', [''])[0].strip()
+
+            if not vid:
+                self.send_response(400)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Missing id parameter')
+                return
+
+            stream_info = None
+            if get_audio_stream_url:
+                stream_info = get_audio_stream_url(vid)
+
+            if not stream_info or not stream_info.get('streamUrl'):
+                target_url = f"https://www.y2meta.mobi/en/youtube-to-mp3/{vid}"
+                self.send_response(302)
+                self.send_header('Location', target_url)
+                self.end_headers()
+                return
+
+            stream_url = stream_info['streamUrl']
+            title = title_param or stream_info.get('title', 'Lagu')
+            clean_title = re.sub(r'[\\/*?:"<>|]', '', title).strip() or 'Lagu'
+            ext = 'm4a' if 'm4a' in stream_url or 'audio/mp4' in stream_info.get('mimeType', '') else 'webm'
+            filename = f"{clean_title}.{ext}"
+
+            try:
+                req = urllib.request.Request(stream_url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                with urllib.request.urlopen(req, timeout=12) as remote_resp:
+                    self.send_response(200)
+                    self.send_header('Content-Type', stream_info.get('mimeType', 'audio/mp4'))
+                    self.send_header('Content-Disposition', f'attachment; filename="{urllib.parse.quote(filename)}"')
+                    cl = remote_resp.headers.get('Content-Length')
+                    if cl:
+                        self.send_header('Content-Length', cl)
+                    self.end_headers()
+
+                    while True:
+                        chunk = remote_resp.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except Exception:
+                try:
+                    self.send_response(302)
+                    self.send_header('Location', stream_url)
+                    self.end_headers()
+                except Exception:
+                    pass
+            return
+
+        # 7. API Network Info / Health check
         if '/network-info' in path or '/network-info' in req_path or action == 'network-info':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')

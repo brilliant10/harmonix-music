@@ -2119,25 +2119,7 @@ window.App = {
     if (!track) return;
     const menu = document.getElementById('track-action-menu');
     if (menu) menu.classList.add('hidden');
-
-    if (track.url && !track.url.includes('youtube.com') && !track.url.includes('youtu.be') && !track.isYouTube) {
-      const a = document.createElement('a');
-      a.href = track.url;
-      a.download = `${track.title} - ${track.artist}.mp3`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showToast(`Mengunduh lagu: ${track.title}`, 'success');
-    } else {
-      const ytId = track.youtubeId || (track.url && track.url.includes('v=') ? track.url.split('v=')[1]?.split('&')[0] : null);
-      const ytUrl = ytId ? `https://www.youtube.com/watch?v=${ytId}` : (track.url || '');
-      if (ytUrl) {
-        window.open(ytUrl, '_blank');
-        showToast(`Membuka tautan YouTube: ${track.title}`, 'info');
-      } else {
-        showToast('Tautan trek tidak dapat diunduh langsung', 'error');
-      }
-    }
+    this.openDownloadModal(track);
   },
 
   // Mobile Connect & QR Code Modal (iPhone & Android)
@@ -2204,6 +2186,14 @@ window.App = {
 
   openAndroidModal() {
     this.openMobileModal('android');
+  },
+
+  openSafariBackgroundModal() {
+    const modal = document.getElementById('safari-bg-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    }
   },
 
   async copyAndroidUrl() {
@@ -2328,9 +2318,11 @@ window.App = {
     if (progressText) progressText.innerText = 'Menyiapkan audio...';
 
     try {
-      await OfflineStorage.saveTrack(track, (percent) => {
+      await OfflineStorage.downloadAndStoreTrack(track, (info) => {
+        const percent = typeof info === 'number' ? info : (info && info.percent ? info.percent : 50);
+        const msg = (info && info.message) ? info.message : `Menyimpan ${percent}%...`;
         if (progressBar) progressBar.style.width = `${percent}%`;
-        if (progressText) progressText.innerText = `Menyimpan ${percent}%...`;
+        if (progressText) progressText.innerText = msg;
       });
 
       if (progressBar) progressBar.style.width = '100%';
@@ -2625,14 +2617,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Search input & Live Suggestions
   const searchInput = document.getElementById('global-search-input');
+  const searchForm = document.getElementById('global-search-form');
+  const searchClearBtn = document.getElementById('global-search-clear');
   let searchTimeout = null;
   let suggestTimeout = null;
+
+  const triggerSearch = (query) => {
+    clearTimeout(searchTimeout);
+    clearTimeout(suggestTimeout);
+    hideSuggestions();
+    if (searchInput) searchInput.blur();
+    if (query) {
+      switchView('search', query);
+    } else {
+      switchView('discover');
+    }
+  };
+
+  if (searchForm) {
+    searchForm.onsubmit = (e) => {
+      e.preventDefault();
+      const query = searchInput ? searchInput.value.trim() : '';
+      triggerSearch(query);
+    };
+  }
+
+  if (searchClearBtn && searchInput) {
+    searchClearBtn.onclick = () => {
+      searchInput.value = '';
+      searchClearBtn.classList.add('hidden');
+      triggerSearch('');
+    };
+  }
 
   if (searchInput) {
     searchInput.oninput = (e) => {
       clearTimeout(searchTimeout);
       clearTimeout(suggestTimeout);
       const query = e.target.value.trim();
+
+      if (searchClearBtn) {
+        if (query) searchClearBtn.classList.remove('hidden');
+        else searchClearBtn.classList.add('hidden');
+      }
 
       if (!query) {
         hideSuggestions();
@@ -2652,11 +2679,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     searchInput.onkeydown = (e) => {
       if (e.key === 'Enter') {
-        clearTimeout(searchTimeout);
-        clearTimeout(suggestTimeout);
-        hideSuggestions();
+        e.preventDefault();
         const query = searchInput.value.trim();
-        if (query) switchView('search', query);
+        triggerSearch(query);
       }
     };
   }

@@ -58,9 +58,15 @@ class AudioEngine {
       networkChange: []
     };
 
+    this.isDirectAudioActive = false;
+    this.keepaliveAudio = null;
+
     this.loadSavedState();
     this.initHtml5AudioEvents();
     this.initYouTubeAPI();
+    this.initSafariBackgroundKeepalive();
+    this.initMediaSession();
+    this.initVisibilityListener();
     this.initNetworkListener();
     this.startTimeTracker();
   }
@@ -115,10 +121,16 @@ class AudioEngine {
               // YT.PlayerState: -1 (unstarted), 0 (ended), 1 (playing), 2 (paused), 3 (buffering), 5 (cued)
               if (event.data === YT.PlayerState.PLAYING) {
                 this.isPlaying = true;
+                this.startSafariKeepalive();
+                if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
                 this.emit('playState', true);
               } else if (event.data === YT.PlayerState.PAUSED) {
-                this.isPlaying = false;
-                this.emit('playState', false);
+                if (!document.hidden) {
+                  this.isPlaying = false;
+                  this.stopSafariKeepalive();
+                  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+                  this.emit('playState', false);
+                }
               } else if (event.data === YT.PlayerState.ENDED) {
                 this.handleTrackEnded();
               }
@@ -144,31 +156,195 @@ class AudioEngine {
   // --- Inisialisasi HTML5 Audio ---
   initHtml5AudioEvents() {
     this.audio.addEventListener('play', () => {
-      if (!this.isCurrentTrackYouTube()) {
-        this.isPlaying = true;
-        this.emit('playState', true);
-      }
+      this.isPlaying = true;
+      this.startSafariKeepalive();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+      this.emit('playState', true);
     });
 
     this.audio.addEventListener('pause', () => {
-      if (!this.isCurrentTrackYouTube()) {
-        this.isPlaying = false;
-        this.emit('playState', false);
+      if (!this.isCurrentTrackYouTube() || this.isDirectAudioActive) {
+        if (!document.hidden) {
+          this.isPlaying = false;
+          this.stopSafariKeepalive();
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+          this.emit('playState', false);
+        }
       }
     });
 
     this.audio.addEventListener('ended', () => {
-      if (!this.isCurrentTrackYouTube()) {
+      if (!this.isCurrentTrackYouTube() || this.isDirectAudioActive) {
         this.handleTrackEnded();
       }
     });
 
     this.audio.addEventListener('error', (e) => {
-      if (!this.isCurrentTrackYouTube()) {
+      if (!this.isCurrentTrackYouTube() || this.isDirectAudioActive) {
         console.warn('Audio playback error:', e);
+        if (this.isDirectAudioActive && this.currentTrack && this.currentTrack.videoId) {
+          this.isDirectAudioActive = false;
+          if (this.ytPlayer && this.isYtReady) {
+            this.ytPlayer.loadVideoById(this.currentTrack.videoId);
+            this.ytPlayer.playVideo();
+            return;
+          }
+        }
         this.emit('error', 'Gagal memutar audio.');
       }
     });
+  }
+
+  // --- Safari iOS Background Audio & MediaSession Handlers ---
+  initSafariBackgroundKeepalive() {
+    const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    try {
+      this.keepaliveAudio = new Audio(SILENT_WAV);
+      this.keepaliveAudio.loop = true;
+      this.keepaliveAudio.volume = 0.01;
+    } catch (e) {
+      console.warn('Keepalive audio init error:', e);
+    }
+  }
+
+  startSafariKeepalive() {
+    if (this.keepaliveAudio) {
+      this.keepaliveAudio.play().catch(() => {});
+    }
+  }
+
+  stopSafariKeepalive() {
+    if (this.keepaliveAudio) {
+      try { this.keepaliveAudio.pause(); } catch (e) {}
+    }
+  }
+
+  initMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+
+    try {
+      navigator.mediaSession.setActionHandler('play', () => this.play());
+      navigator.mediaSession.setActionHandler('pause', () => this.pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
+      navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) this.seek(details.seekTime);
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        const offset = details.seekOffset || 10;
+        this.seek(Math.max(0, this.getCurrentTime() - offset));
+      });
+      navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        const offset = details.seekOffset || 10;
+        this.seek(this.getCurrentTime() + offset);
+      });
+      navigator.mediaSession.setActionHandler('stop', () => this.pause());
+    } catch (e) {
+      console.warn('MediaSession handler error:', e);
+    }
+  }
+
+  updateMediaSessionMetadata() {
+    if (!('mediaSession' in navigator) || !this.currentTrack) return;
+    const track = this.currentTrack;
+    const art = track.artwork || 'icons/icon-192.png';
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title || 'HarmoniX Music',
+        artist: track.artist || 'HarmoniX',
+        album: 'HarmoniX Music Universe',
+        artwork: [
+          { src: art, sizes: '96x96', type: 'image/png' },
+          { src: art, sizes: '128x128', type: 'image/png' },
+          { src: art, sizes: '192x192', type: 'image/png' },
+          { src: art, sizes: '256x256', type: 'image/png' },
+          { src: art, sizes: '512x512', type: 'image/png' }
+        ]
+      });
+      navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused';
+    } catch (e) {
+      console.warn('MediaSession metadata error:', e);
+    }
+  }
+
+  updateMediaSessionPosition(cur, dur) {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    if (dur && dur > 0 && !isNaN(cur) && !isNaN(dur)) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(dur, 1),
+          playbackRate: 1,
+          position: Math.min(Math.max(0, cur), dur)
+        });
+      } catch (e) {}
+    }
+  }
+
+  initVisibilityListener() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (this.isPlaying) {
+          this.startSafariKeepalive();
+
+          if (this.isCurrentTrackYouTube() && this.currentTrack && this.currentTrack.directStreamUrl) {
+            const curTime = this.getCurrentTime();
+            try {
+              if (this.ytPlayer && this.isYtReady) {
+                this.ytPlayer.pauseVideo();
+              }
+              this.isDirectAudioActive = true;
+              this.audio.src = this.currentTrack.directStreamUrl;
+              this.audio.currentTime = curTime;
+              this.audio.volume = this.volume;
+              this.audio.muted = this.isMuted;
+              this.audio.play().catch(err => console.warn('Background audio switch failed:', err));
+            } catch (e) {
+              console.warn('Visibility audio switch error:', e);
+            }
+          }
+        }
+      } else {
+        if (this.isDirectAudioActive && this.isPlaying) {
+          const curTime = this.audio.currentTime || 0;
+          this.isDirectAudioActive = false;
+          this.audio.pause();
+          if (this.ytPlayer && this.isYtReady) {
+            try {
+              this.ytPlayer.seekTo(curTime, true);
+              this.ytPlayer.playVideo();
+            } catch (e) {}
+          }
+        }
+      }
+    });
+  }
+
+  async fetchDirectAudioStream(track, videoId) {
+    if (!videoId || track.directStreamUrl) return;
+    try {
+      const res = await fetch(`/api/stream?id=${videoId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && json.data.streamUrl) {
+          track.directStreamUrl = json.data.streamUrl;
+        }
+      }
+    } catch (e) {}
+  }
+
+  getCurrentTime() {
+    if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive && this.ytPlayer && this.isYtReady) {
+      try { return this.ytPlayer.getCurrentTime() || 0; } catch (e) { return 0; }
+    }
+    return this.audio ? (this.audio.currentTime || 0) : 0;
+  }
+
+  getDuration() {
+    if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive && this.ytPlayer && this.isYtReady) {
+      try { return this.ytPlayer.getDuration() || (this.currentTrack ? this.currentTrack.duration : 0); } catch (e) { return 0; }
+    }
+    return this.audio && this.audio.duration ? this.audio.duration : (this.currentTrack ? this.currentTrack.duration : 0);
   }
 
   // Timer reguler untuk update posisi seekbar & durasi
@@ -178,22 +354,16 @@ class AudioEngine {
     this.timeTrackerInterval = setInterval(() => {
       if (!this.isPlaying || !this.currentTrack) return;
 
-      if (this.isCurrentTrackYouTube() && this.ytPlayer && this.isYtReady) {
-        try {
-          const cur = this.ytPlayer.getCurrentTime() || 0;
-          const dur = this.ytPlayer.getDuration() || (this.currentTrack ? this.currentTrack.duration : 0);
-          this.emit('timeUpdate', { currentTime: cur, duration: dur });
-        } catch (e) {}
-      } else if (!this.isCurrentTrackYouTube() && this.audio) {
-        this.emit('timeUpdate', {
-          currentTime: this.audio.currentTime || 0,
-          duration: this.audio.duration || (this.currentTrack ? this.currentTrack.duration : 0)
-        });
-      }
+      const cur = this.getCurrentTime();
+      const dur = this.getDuration();
+
+      this.emit('timeUpdate', { currentTime: cur, duration: dur });
+      this.updateMediaSessionPosition(cur, dur);
     }, 250);
   }
 
   isCurrentTrackYouTube() {
+    if (this.isDirectAudioActive) return false;
     // Lagu offline atau yang memiliki audioBlob selalu diputar via HTML5 Audio
     if (this.currentTrack && (this.currentTrack.isOffline || this.currentTrack.audioBlob || this.currentTrack.source === 'offline')) {
       return false;
@@ -224,8 +394,10 @@ class AudioEngine {
     }
 
     this.currentTrack = track;
+    this.isDirectAudioActive = false;
     Storage.addToHistory(track);
     this.emit('trackChange', track);
+    this.updateMediaSessionMetadata();
 
     // 1. Jika lagu offline (disimpan di IndexedDB)
     if (track.isOffline || track.audioBlob || track.source === 'offline') {
@@ -249,6 +421,8 @@ class AudioEngine {
         this.audio.muted = this.isMuted;
         await this.audio.play();
         this.isPlaying = true;
+        this.startSafariKeepalive();
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         this.emit('playState', true);
       } catch (e) {
         console.warn('Pemutaran offline gagal:', e);
@@ -260,6 +434,8 @@ class AudioEngine {
       this.audio.currentTime = 0;
 
       const videoId = track.videoId || track.id.replace('yt-', '');
+      this.startSafariKeepalive();
+      this.fetchDirectAudioStream(track, videoId);
 
       if (this.isYtReady && this.ytPlayer) {
         try {
@@ -268,6 +444,7 @@ class AudioEngine {
           this.ytPlayer.loadVideoById(videoId);
           this.ytPlayer.playVideo();
           this.isPlaying = true;
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
           this.emit('playState', true);
         } catch (e) {
           console.warn('YT loadVideoById error:', e);
@@ -288,6 +465,8 @@ class AudioEngine {
         this.audio.muted = this.isMuted;
         await this.audio.play();
         this.isPlaying = true;
+        this.startSafariKeepalive();
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         this.emit('playState', true);
       } catch (e) {
         console.warn('HTML5 audio play error:', e);
@@ -296,24 +475,30 @@ class AudioEngine {
   }
 
   play() {
-    if (this.isCurrentTrackYouTube()) {
+    if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive) {
       if (this.ytPlayer && this.isYtReady) {
         this.ytPlayer.playVideo();
       }
     } else {
-      this.audio.play();
+      this.audio.play().catch(() => {});
     }
+    this.startSafariKeepalive();
+    this.isPlaying = true;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    this.emit('playState', true);
   }
 
   pause() {
-    if (this.isCurrentTrackYouTube()) {
+    if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive) {
       if (this.ytPlayer && this.isYtReady) {
         this.ytPlayer.pauseVideo();
       }
     } else {
       this.audio.pause();
     }
+    this.stopSafariKeepalive();
     this.isPlaying = false;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     this.emit('playState', false);
   }
 
@@ -389,11 +574,12 @@ class AudioEngine {
   seek(seconds) {
     if (isNaN(seconds)) return;
 
-    if (this.isCurrentTrackYouTube() && this.ytPlayer && this.isYtReady) {
+    if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive && this.ytPlayer && this.isYtReady) {
       this.ytPlayer.seekTo(seconds, true);
     } else if (this.audio && this.audio.duration) {
       this.audio.currentTime = Math.max(0, Math.min(seconds, this.audio.duration));
     }
+    this.updateMediaSessionPosition(seconds, this.getDuration());
   }
 
   setVolume(fraction) {
