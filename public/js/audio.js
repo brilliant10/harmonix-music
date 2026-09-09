@@ -4,6 +4,8 @@
  */
 
 import { Storage } from './storage.js';
+import { STARTER_HITS } from './api.js';
+import { Recommendations } from './recommendations.js';
 
 export const EQ_PRESETS = {
   flat: { name: 'Flat', gains: [0, 0, 0, 0, 0] },
@@ -496,62 +498,154 @@ class AudioEngine {
     }
   }
 
-  next() {
-    if (this.queue.length === 0) return;
+  async next() {
+    // 1. Jika antrean kosong, coba ambil dari daftar aktif atau starter hits
+    if (!this.queue || this.queue.length === 0) {
+      if (window.App && window.App.AppState && window.App.AppState.currentTrackList && window.App.AppState.currentTrackList.length > 0) {
+        this.queue = [...window.App.AppState.currentTrackList];
+        this.queueIndex = 0;
+        this.playTrack(this.queue[0]);
+        return;
+      }
+      this.queue = [...STARTER_HITS];
+      this.queueIndex = 0;
+      this.playTrack(this.queue[0]);
+      return;
+    }
 
+    // 2. Mode Shuffle: pilih lagu acak yang berbeda di antrean
     if (this.shuffle) {
       let nextIndex = Math.floor(Math.random() * this.queue.length);
       if (this.queue.length > 1 && nextIndex === this.queueIndex) {
         nextIndex = (nextIndex + 1) % this.queue.length;
       }
       this.queueIndex = nextIndex;
-    } else {
-      if (this.queueIndex < this.queue.length - 1) {
-        this.queueIndex++;
-      } else if (this.repeat === 'all') {
-        this.queueIndex = 0;
-      } else {
-        this.emit('queueEnded', { lastTrack: this.currentTrack, queue: this.queue });
+      this.playTrack(this.queue[this.queueIndex]);
+      return;
+    }
+
+    // 3. Masih ada lagu selanjutnya di antrean
+    if (this.queueIndex < this.queue.length - 1) {
+      this.queueIndex++;
+      this.playTrack(this.queue[this.queueIndex]);
+      return;
+    }
+
+    // 4. Repeat 'all': putar ulang dari track pertama di antrean
+    if (this.repeat === 'all') {
+      this.queueIndex = 0;
+      this.playTrack(this.queue[0]);
+      return;
+    }
+
+    // 5. Antrean sudah sampai di akhir (atau antrean hanya 1 lagu) & repeat 'off':
+    // Cek daftar lagu aktif saat ini di AppState (hasil search, trending, dll)
+    if (window.App && window.App.AppState && window.App.AppState.currentTrackList && window.App.AppState.currentTrackList.length > 1) {
+      const activeList = window.App.AppState.currentTrackList;
+      const curIdx = activeList.findIndex(t => String(t.id) === String(this.currentTrack?.id));
+      if (curIdx !== -1 && curIdx < activeList.length - 1) {
+        const nextTrack = activeList[curIdx + 1];
+        this.queue.push(nextTrack);
+        this.queueIndex = this.queue.length - 1;
+        this.playTrack(nextTrack);
+        this.emit('queueChange', this.queue);
         return;
+      } else if (curIdx !== -1 && curIdx >= activeList.length - 1) {
+        // Jika sudah di lagu terakhir pencarian, kembali ke lagu pertama daftar
+        const firstTrack = activeList[0];
+        if (String(firstTrack.id) !== String(this.currentTrack?.id)) {
+          this.queue.push(firstTrack);
+          this.queueIndex = this.queue.length - 1;
+          this.playTrack(firstTrack);
+          this.emit('queueChange', this.queue);
+          return;
+        }
       }
     }
 
-    this.playTrack(this.queue[this.queueIndex]);
+    // 6. Jika antrean memiliki lebih dari 1 lagu, putar melingkar ke lagu pertama
+    if (this.queue.length > 1) {
+      this.queueIndex = 0;
+      this.playTrack(this.queue[0]);
+      this.emit('queueEnded', { lastTrack: this.currentTrack, queue: this.queue });
+      return;
+    }
+
+    // 7. Jika antrean HANYA 1 lagu:
+    // User mengklik SKIP! Pastikan memutar lagu yang BERBEDA (jangan diam / error)
+    const diffTrack = STARTER_HITS.find(t => String(t.id) !== String(this.currentTrack?.id)) || STARTER_HITS[0];
+    if (diffTrack && String(diffTrack.id) !== String(this.currentTrack?.id)) {
+      this.queue.push(diffTrack);
+      this.queueIndex = this.queue.length - 1;
+      this.playTrack(diffTrack);
+      this.emit('queueChange', this.queue);
+
+      // Cari rekomendasi dinamis berikutnya di background
+      try {
+        const smartTrack = await Recommendations.getAutoPlayTrack(this.queue, Storage.getHistory());
+        if (smartTrack && String(smartTrack.id) !== String(diffTrack.id)) {
+          this.queue.push(smartTrack);
+          this.emit('queueChange', this.queue);
+        }
+      } catch (e) {}
+      return;
+    }
+
+    // Fallback: putar ulang lagu
+    this.seek(0);
+    this.play();
   }
 
   prev() {
-    if (this.queue.length === 0) return;
+    if (!this.queue || this.queue.length === 0) return;
 
     let currentSecs = 0;
     if (this.isCurrentTrackYouTube() && this.ytPlayer && this.isYtReady) {
-      currentSecs = this.ytPlayer.getCurrentTime() || 0;
+      try {
+        currentSecs = this.ytPlayer.getCurrentTime() || 0;
+      } catch (e) {
+        currentSecs = 0;
+      }
     } else {
       currentSecs = this.audio.currentTime || 0;
     }
 
+    // Jika lagu sudah berjalan lebih dari 3 detik, restart ke detik 0
     if (currentSecs > 3) {
       this.seek(0);
       return;
     }
 
+    // Ke lagu sebelumnya di antrean
     if (this.queueIndex > 0) {
       this.queueIndex--;
-    } else {
+      this.playTrack(this.queue[this.queueIndex]);
+    } else if (this.queue.length > 1) {
       this.queueIndex = this.queue.length - 1;
+      this.playTrack(this.queue[this.queueIndex]);
+    } else {
+      this.seek(0);
     }
-
-    this.playTrack(this.queue[this.queueIndex]);
   }
 
   seek(seconds) {
     if (isNaN(seconds)) return;
+    const targetSec = Math.max(0, seconds);
 
     if (this.isCurrentTrackYouTube() && !this.isDirectAudioActive && this.ytPlayer && this.isYtReady) {
-      this.ytPlayer.seekTo(seconds, true);
-    } else if (this.audio && this.audio.duration) {
-      this.audio.currentTime = Math.max(0, Math.min(seconds, this.audio.duration));
+      try {
+        this.ytPlayer.seekTo(targetSec, true);
+      } catch (e) {
+        console.warn('YT seek error:', e);
+      }
+    } else if (this.audio) {
+      try {
+        const dur = this.audio.duration || targetSec;
+        this.audio.currentTime = Math.min(targetSec, dur);
+      } catch (e) {}
     }
-    this.updateMediaSessionPosition(seconds, this.getDuration());
+    this.updateMediaSessionPosition(targetSec, this.getDuration());
+    this.emit('timeUpdate', { currentTime: targetSec, duration: this.getDuration() });
   }
 
   setVolume(fraction) {
@@ -638,3 +732,6 @@ class AudioEngine {
 }
 
 export const Player = new AudioEngine();
+if (typeof window !== 'undefined') {
+  window.Player = Player;
+}

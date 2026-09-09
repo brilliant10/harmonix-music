@@ -10,6 +10,11 @@ import { OfflineStorage } from './offline.js';
 import { Recommendations } from './recommendations.js';
 import { Lyrics } from './lyrics.js';
 
+// Expose Player globally so inline HTML onclick handlers never fail
+if (typeof window !== 'undefined') {
+  window.Player = Player;
+}
+
 // Application State
 const AppState = {
   currentView: 'discover',
@@ -1042,7 +1047,7 @@ function renderTrackCard(track, index, trackList) {
   const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
-    <div class="glass-card rounded-2xl p-3 flex flex-col justify-between group relative overflow-hidden ${isCurrentlyPlaying ? 'active-track-glow' : ''}">
+    <div onclick="window.App.playFromCard('${trackId}', ${index})" class="glass-card rounded-2xl p-3 flex flex-col justify-between group relative overflow-hidden cursor-pointer transition-all hover:border-indigo-500/50 ${isCurrentlyPlaying ? 'active-track-glow' : ''}">
       <div class="relative w-full aspect-square rounded-xl overflow-hidden mb-3 bg-slate-800">
         <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         
@@ -1055,9 +1060,9 @@ function renderTrackCard(track, index, trackList) {
           </div>
         ` : ''}
 
-        <!-- Hover Overlay -->
+        <!-- Hover Overlay Play Button -->
         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px]">
-          <button onclick="window.App.playFromCard('${trackId}', ${index})" class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
+          <button onclick="event.stopPropagation(); window.App.playFromCard('${trackId}', ${index})" class="w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xl glow-primary transform hover:scale-110 active:scale-95 transition-all">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-5 h-5 fill-current ml-0.5"></i>
           </button>
         </div>
@@ -1066,7 +1071,7 @@ function renderTrackCard(track, index, trackList) {
           <i data-lucide="download" class="w-4 h-4"></i>
         </button>
 
-        <button onclick="window.App.toggleLike('${trackId}', this)" class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="event.stopPropagation(); window.App.toggleLike('${trackId}', this)" class="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/60 backdrop-blur-md text-slate-300 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
       </div>
@@ -1078,7 +1083,7 @@ function renderTrackCard(track, index, trackList) {
 
       <div class="flex items-center justify-between mt-3 pt-2 border-t border-white/5 text-[11px] text-slate-500">
         <span class="truncate max-w-[90px] font-mono">${track.durationStr || formatTime(track.duration)}</span>
-        <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-1 rounded hover:text-slate-200 transition-colors">
+        <button onclick="event.stopPropagation(); window.App.openTrackMenu('${trackId}', event)" class="p-1 rounded hover:text-slate-200 transition-colors">
           <i data-lucide="more-horizontal" class="w-4 h-4"></i>
         </button>
       </div>
@@ -1094,7 +1099,7 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
   const isCurrentlyPlaying = Player.currentTrack && String(Player.currentTrack.id) === trackId;
 
   return `
-    <div class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 transition-all ${isCurrentlyPlaying ? 'border-indigo-500/50 bg-indigo-950/25 active-track-glow' : ''}">
+    <div onclick="window.App.playFromRow('${trackId}', ${index})" class="flex items-center justify-between p-3 rounded-2xl glass-card group hover:bg-slate-800/60 cursor-pointer transition-all ${isCurrentlyPlaying ? 'border-indigo-500/50 bg-indigo-950/25 active-track-glow' : ''}">
       <div class="flex items-center gap-3 min-w-0 flex-1">
         <div class="w-7 text-center text-xs text-slate-400 font-medium">
           ${isCurrentlyPlaying && Player.isPlaying ? `
@@ -1108,7 +1113,7 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
 
         <div class="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-800">
           <img src="${track.artwork || 'icons/icon-192.png'}" alt="${escapeHtml(track.title)}" class="w-full h-full object-cover" loading="lazy" />
-          <button onclick="window.App.playFromRow('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
+          <button onclick="event.stopPropagation(); window.App.playFromRow('${trackId}', ${index})" class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white">
             <i data-lucide="${isCurrentlyPlaying && Player.isPlaying ? 'pause' : 'play'}" class="w-4 h-4 fill-current"></i>
           </button>
         </div>
@@ -1126,16 +1131,16 @@ function renderTrackRow(track, index, trackList, playlistId = null) {
           <i data-lucide="download" class="w-4 h-4"></i>
         </button>
 
-        <button onclick="window.App.toggleLike('${trackId}', this)" class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
+        <button onclick="event.stopPropagation(); window.App.toggleLike('${trackId}', this)" class="p-2 text-slate-400 hover:text-rose-500 transition-colors ${isLiked ? 'text-rose-500' : ''}">
           <i data-lucide="heart" class="w-4 h-4 ${isLiked ? 'fill-current' : ''}"></i>
         </button>
 
         ${playlistId ? `
-          <button onclick="window.App.removeFromPlaylist('${playlistId}', '${trackId}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
+          <button onclick="event.stopPropagation(); window.App.removeFromPlaylist('${playlistId}', '${trackId}')" title="Hapus dari playlist" class="p-2 text-slate-400 hover:text-rose-400 transition-colors">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
         ` : `
-          <button onclick="window.App.openTrackMenu('${trackId}', event)" class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
+          <button onclick="event.stopPropagation(); window.App.openTrackMenu('${trackId}', event)" class="p-2 text-slate-400 hover:text-slate-200 transition-colors">
             <i data-lucide="more-vertical" class="w-4 h-4"></i>
           </button>
         `}
@@ -1320,36 +1325,68 @@ function setupPlayerSync() {
     };
   }
 
-  // Seek bar scrub & hover tooltip
-  const seekSlider = document.getElementById('player-seek-slider');
-  const seekTooltip = document.getElementById('seek-tooltip');
+  // Helper for ultra-smooth scrub & seek on both desktop and mobile
+  const bindSeekSlider = (slider, timeDisplay) => {
+    if (!slider) return;
 
-  if (seekSlider) {
-    seekSlider.onmousedown = () => { seekSlider.dataset.dragging = 'true'; };
-    seekSlider.ontouchstart = () => { seekSlider.dataset.dragging = 'true'; };
-    seekSlider.onchange = (e) => {
-      Player.seek(parseFloat(e.target.value));
-      delete seekSlider.dataset.dragging;
+    let isSeeking = false;
+
+    const startSeeking = () => {
+      isSeeking = true;
+      slider.dataset.dragging = 'true';
     };
 
+    const updateSeekTime = (e) => {
+      isSeeking = true;
+      slider.dataset.dragging = 'true';
+      const targetSec = parseFloat(e.target.value);
+      if (timeDisplay && !isNaN(targetSec)) {
+        timeDisplay.innerText = formatTime(targetSec);
+      }
+    };
+
+    const commitSeek = (e) => {
+      if (isSeeking || slider.dataset.dragging) {
+        const targetSec = parseFloat(slider.value);
+        if (!isNaN(targetSec)) {
+          Player.seek(targetSec);
+        }
+        delete slider.dataset.dragging;
+        isSeeking = false;
+      }
+    };
+
+    slider.addEventListener('pointerdown', startSeeking);
+    slider.addEventListener('touchstart', startSeeking, { passive: true });
+    slider.addEventListener('mousedown', startSeeking);
+
+    slider.addEventListener('input', updateSeekTime);
+
+    slider.addEventListener('change', commitSeek);
+    slider.addEventListener('pointerup', commitSeek);
+    slider.addEventListener('touchend', commitSeek);
+    slider.addEventListener('mouseup', commitSeek);
+    slider.addEventListener('touchcancel', () => {
+      delete slider.dataset.dragging;
+      isSeeking = false;
+    });
+  };
+
+  const seekSlider = document.getElementById('player-seek-slider');
+  const fsSeekSlider = document.getElementById('fs-seek-slider');
+  const seekTooltip = document.getElementById('seek-tooltip');
+
+  bindSeekSlider(seekSlider, document.getElementById('player-current-time'));
+  bindSeekSlider(fsSeekSlider, document.getElementById('fs-current-time'));
+
+  if (seekSlider && seekTooltip) {
     seekSlider.onmousemove = (e) => {
-      if (!seekTooltip) return;
       const rect = seekSlider.getBoundingClientRect();
       const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const maxDur = parseFloat(seekSlider.max) || 100;
       const hoverSecs = pos * maxDur;
       seekTooltip.innerText = formatTime(hoverSecs);
       seekTooltip.style.left = `${(pos * 100).toFixed(1)}%`;
-    };
-  }
-
-  const fsSeekSlider = document.getElementById('fs-seek-slider');
-  if (fsSeekSlider) {
-    fsSeekSlider.onmousedown = () => { fsSeekSlider.dataset.dragging = 'true'; };
-    fsSeekSlider.ontouchstart = () => { fsSeekSlider.dataset.dragging = 'true'; };
-    fsSeekSlider.onchange = (e) => {
-      Player.seek(parseFloat(e.target.value));
-      delete fsSeekSlider.dataset.dragging;
     };
   }
 
@@ -1768,9 +1805,15 @@ function setupFullscreenOverlay() {
   const overlay = document.getElementById('fullscreen-overlay');
   const openBtn = document.getElementById('btn-open-fullscreen');
   const closeBtn = document.getElementById('btn-close-fullscreen');
+  const fsPlayBtn = document.getElementById('fs-btn-play');
+  const fsNextBtn = document.getElementById('fs-btn-next');
+  const fsPrevBtn = document.getElementById('fs-btn-prev');
 
   if (openBtn) openBtn.onclick = () => overlay.classList.remove('hidden');
   if (closeBtn) closeBtn.onclick = () => overlay.classList.add('hidden');
+  if (fsPlayBtn) fsPlayBtn.onclick = () => Player.togglePlay();
+  if (fsNextBtn) fsNextBtn.onclick = () => Player.next();
+  if (fsPrevBtn) fsPrevBtn.onclick = () => Player.prev();
 }
 
 function closeMobileSidebar() {
@@ -1787,9 +1830,24 @@ function openMobileSidebar() {
 window.App = {
   AppState,
   switchView,
+  next() {
+    return Player.next();
+  },
+  prev() {
+    return Player.prev();
+  },
+  togglePlay() {
+    return Player.togglePlay();
+  },
+  seek(seconds) {
+    return Player.seek(seconds);
+  },
   playSingle(trackOrId) {
     const track = resolveTrack(trackOrId);
-    if (track) Player.playTrack(track);
+    if (track) {
+      const q = AppState.currentTrackList && AppState.currentTrackList.length > 0 ? AppState.currentTrackList : [track];
+      Player.playTrack(track, q);
+    }
   },
   playFromCard(trackOrId, index) {
     const track = resolveTrack(trackOrId);
@@ -1797,7 +1855,8 @@ window.App = {
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
-      Player.playTrack(track, AppState.currentTrackList);
+      const q = AppState.currentTrackList && AppState.currentTrackList.length > 0 ? AppState.currentTrackList : [track];
+      Player.playTrack(track, q);
     }
   },
   playFromRow(trackOrId, index) {
@@ -1806,7 +1865,8 @@ window.App = {
     if (Player.currentTrack && String(Player.currentTrack.id) === String(track.id)) {
       Player.togglePlay();
     } else {
-      Player.playTrack(track, AppState.currentTrackList);
+      const q = AppState.currentTrackList && AppState.currentTrackList.length > 0 ? AppState.currentTrackList : [track];
+      Player.playTrack(track, q);
     }
   },
   playStation(stationOrId) {
@@ -2651,6 +2711,12 @@ function setupKeyboardShortcuts() {
         break;
       case 'KeyF':
         document.getElementById('btn-open-fullscreen').click();
+        break;
+      case 'KeyN':
+        Player.next();
+        break;
+      case 'KeyP':
+        Player.prev();
         break;
       case 'KeyL':
         if (Player.currentTrack) {
